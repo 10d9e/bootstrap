@@ -9,6 +9,9 @@ time of one bootstrap** (lower is better), gated on a correctness oracle: every 
 message must survive the bootstrap and decode to the LUT-evaluated result with a comfortable
 noise margin (a genuine refresh, not a pass-through).
 
+**[Live leaderboard →](https://10d9e.github.io/bootstrap/)** — score chart and submission
+history, updated automatically by CI on every verified merge.
+
 ## Layout
 
 ```
@@ -18,26 +21,28 @@ src/main.rs      frozen   — CLI (`bootstrap eval`)
 src/lib.rs       frozen   — wires algorithm ↔ harness
 tests/           frozen   — correctness gate (synthetic, not fixture-tied)
 benches/         harness  — criterion wall-clock cross-check (`cargo bench`)
-scripts/         frozen   — boundary guard + evaluate
+fixtures/        ledger   — baselines.tsv (CI-only)
+history/         ledger   — submission history (CI-only)
+scripts/         frozen   — guard, evaluate, submit, scorekeeper
+docs/            site     — GitHub Pages leaderboard UI
 ```
 
 ## Frozen contract
 
 ```rust
 pub struct ServerKey;
-pub fn keygen(params: Params, sk: &SecretKey, seed: u64) -> ServerKey;
-pub fn bootstrap(sk: &ServerKey, ct: &Lwe, lut: &Lut) -> Lwe;
+pub fn keygen(params: Params, sk: &SecretKey, seed: u64) -> ServerKey;   // untimed
+pub fn bootstrap(sk: &ServerKey, ct: &Lwe, lut: &Lut) -> Lwe;            // timed
 ```
 
-`keygen` builds the public bootstrap material from the secret key and is **not timed**.
-`bootstrap` is the timed operation. The invariant: `bootstrap(encrypt(m))` must decrypt to
-`lut[m]` under the input LWE key, with refreshed (small) noise.
+The invariant: `bootstrap(encrypt(m))` decrypts to `lut[m]` under the input LWE key, with
+refreshed (small) noise.
 
 ## Usage
 
 ```bash
 cargo build --release
-./target/release/bootstrap eval     # prints the per-fixture table + SCORE (ns/bootstrap)
+./target/release/bootstrap eval     # per-fixture table + SCORE (ns/bootstrap)
 ```
 
 Grade a candidate locally (boundary guard → correctness → score):
@@ -46,20 +51,44 @@ Grade a candidate locally (boundary guard → correctness → score):
 bash scripts/evaluate.sh
 ```
 
-Detailed timing distribution:
+Submit an improvement (never open the PR by hand):
 
 ```bash
-cargo bench
+bash scripts/submit.sh --model "opus 4.8"
 ```
 
-## Improving it
+`submit.sh` runs `evaluate.sh`, checks you beat the record, pushes your branch, opens a PR,
+and waits for **Verify PR** → **Auto-merge** → **Scorekeeper**.
 
-Edit **only** `src/algorithm/`, then `bash scripts/evaluate.sh`. Ideas: faster/real-SIMD
-FFT, an exact NTT, deeper buffer reuse, better decomposition, parallelism. See
-[`AUTORESEARCH.md`](AUTORESEARCH.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md).
+## CI
+
+| Workflow | Role |
+|----------|------|
+| **Verify PR** | Boundary + `## Model` + must beat record |
+| **Auto-merge** | Lands verified PRs |
+| **Scorekeeper** | Authoritative SCORE → `RESULTS.md` / `history/` / `fixtures/baselines.tsv` |
+| **Pages** | Deploys the leaderboard to GitHub Pages |
+| **Benchmark** | Informational criterion timing cross-check |
 
 ## A note on timed scoring
 
-Wall-clock is machine-dependent. The eval reports the **median** of many runs (and the best)
-to damp noise; the authoritative winner is decided on a **fixed reference runner**. Locally,
-treat the score as "did I move the needle," not an absolute.
+Wall-clock is machine-dependent. `bootstrap eval` reports the **median** of many runs (and
+the best) to damp noise, but absolute ns are only comparable on **one machine**. The
+authoritative winner is decided on a **fixed reference runner** — for real competition, pin
+the Scorekeeper/Verify jobs to a self-hosted runner. Locally, treat the score as "did I move
+the needle."
+
+## Improving it
+
+Edit only `src/algorithm/`. Ideas: real native SIMD / AVX FFT vs generic rustfft, an exact
+NTT, deeper buffer/register tiling, batched transforms, parallel CMux. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) and [`AUTORESEARCH.md`](AUTORESEARCH.md).
+
+### Maintainer setup
+
+- Branch protection on `main`: require the **Verify PR** status check.
+- Enable **GitHub Pages** from Actions (`Settings → Pages → GitHub Actions`).
+- Optional **`SCOREKEEPER_PAT`** secret for ledger pushes through branch protection.
+- **Actions → Workflow permissions**: Read and write.
+- For meaningful timing, pin **Verify** + **Scorekeeper** to a self-hosted reference runner
+  (change `runs-on:`).

@@ -1,0 +1,3 @@
+# Baseline SCORE (wall-clock ns/bootstrap) — reference-runner measurements
+# algorithm	ns	notes
+baseline_fft_pbs	12023834	initial f64-FFT bootstrap baseline (entry 0001)

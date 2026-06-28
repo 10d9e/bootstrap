@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>bootstrap — TFHE Programmable Bootstrap Leaderboard</title>
+  <meta name="description" content="Live leaderboard for the bootstrap TFHE programmable-bootstrap autoresearch benchmark (wall-clock scored)." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="titlebar">
+    <div class="wrap titlebar-inner">
+      <div class="tb-left">
+        <span class="logo-mark">bs</span>
+        <div class="title-block">
+          <h1>TFHE Programmable Bootstrap Leaderboard</h1>
+          <p class="tagline">Lower is better — wall-clock ns per bootstrap at N=1024, k=1.</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <span class="tb-tag">autoresearch</span>
+        <button type="button" class="tb-btn instructions-btn" id="instructionsBtn">How to compete</button>
+        <a class="tb-btn primary" id="repoLink" href="#" target="_blank" rel="noopener">GitHub →</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="stats" id="stats" aria-label="Summary statistics"></section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>SCORE over time</h2>
+        <span class="hint">lower = faster · cyan line = record frontier</span>
+      </div>
+      <div class="chart-box">
+        <canvas id="scoreChart"></canvas>
+      </div>
+      <div class="range-control" id="rangeControl" hidden>
+        <div class="range-slider">
+          <div class="range-track"></div>
+          <div class="range-fill" id="rangeFill"></div>
+          <input type="range" id="rangeMin" min="0" max="0" value="0" step="1" aria-label="Range start" />
+          <input type="range" id="rangeMax" min="0" max="0" value="0" step="1" aria-label="Range end" />
+        </div>
+        <div class="range-readout">
+          <span id="rangeLabel"></span>
+          <button type="button" class="range-reset" id="rangeReset">reset</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Submissions</h2>
+        <span class="hint" id="entryCount"></span>
+      </div>
+      <div class="table-wrap">
+        <table class="leaderboard" id="grid"></table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <span>Ledger is CI-only — updated by <strong>Scorekeeper</strong> on every verified merge to <code>main</code>. Wall-clock SCORE is comparable only on the reference runner.</span>
+      <span id="generatedAt"></span>
+    </div>
+  </footer>
+
+  <dialog id="entryDialog" class="entry-dialog">
+    <div class="dialog-inner" id="dialogInner"></div>
+  </dialog>
+
+  <dialog id="instructionsDialog" class="entry-dialog instructions-dialog">
+    <div class="dialog-inner">
+      <button class="dialog-close" aria-label="Close" data-close>×</button>
+      <header class="dialog-head instructions-head">
+        <div class="d-head-text">
+          <div class="d-title">How to compete</div>
+          <div class="d-sub">Make the TFHE programmable bootstrap faster and lower the SCORE.</div>
+        </div>
+      </header>
+      <div class="instructions-body">
+        <section class="d-sec">
+          <h3>The objective</h3>
+          <p class="note">Minimize <strong>SCORE</strong> — median <strong>wall-clock nanoseconds</strong> for one programmable bootstrap (CGGI blind rotation + sample-extract + key-switch) at <code>N=1024, k=1</code>. Lower is faster. Only submissions that beat the current record (on the reference runner) can merge.</p>
+        </section>
+        <section class="d-sec">
+          <h3>Rules</h3>
+          <ul class="instructions-list">
+            <li>Edit <strong>only</strong> <code>src/algorithm/</code>.</li>
+            <li>Keep the contract: <code>ServerKey</code>, <code>keygen</code>, <code>bootstrap</code>.</li>
+            <li>Every encrypted message must bootstrap to <code>lut[m]</code> with refreshed noise (the harness owns the secret key — no shortcuts).</li>
+            <li>No fixture special-casing or side channels.</li>
+          </ul>
+        </section>
+        <section class="d-sec">
+          <h3>Workflow</h3>
+          <ol class="instructions-list">
+            <li>Fork, branch, iterate with <code>bash scripts/evaluate.sh</code></li>
+            <li>Submit: <code>bash scripts/submit.sh --model "&lt;model&gt;"</code></li>
+            <li>CI verifies boundary + beats record → auto-merge</li>
+            <li>Scorekeeper records the authoritative SCORE here</li>
+          </ol>
+        </section>
+        <section class="d-sec">
+          <h3>Research leads</h3>
+          <p class="note">Real native SIMD / AVX FFT vs generic rustfft, an exact NTT, deeper register/buffer tiling, batched transforms, fused sample-extract/key-switch, parallel CMux. <code>keygen</code> is free — precompute aggressively.</p>
+        </section>
+      </div>
+      <footer class="dialog-foot instructions-foot">
+        <a id="instructionsReadme" href="#" target="_blank" rel="noopener">AUTORESEARCH.md →</a>
+        <a id="instructionsContrib" href="#" target="_blank" rel="noopener">Contributing →</a>
+      </footer>
+    </div>
+  </dialog>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

@@ -7,35 +7,61 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Boundary guard (only src/algorithm/ may change)
-        run: |
-          git fetch origin "${{ github.base_ref }}" --depth=1
-          changed=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")
-          echo "Changed files:"; echo "$changed"
-          bad=$(echo "$changed" | grep -v '^src/algorithm/' | grep -v '^$' || true)
-          if [ -n "$bad" ]; then
-            echo "BOUNDARY VIOLATION — frozen files modified:"; echo "$bad"; exit 1
-          fi
-
-      - name: Contract intact
-        run: |
-          mod=src/algorithm/mod.rs
-          grep -qF 'pub struct ServerKey' "$mod"
-          grep -qF 'pub fn keygen(params: Params, sk: &SecretKey, seed: u64) -> ServerKey' "$mod"
-          grep -qF 'pub fn bootstrap(sk: &ServerKey, ct: &Lwe, lut: &Lut) -> Lwe' "$mod"
-          if grep -rqE '#\[\s*global_allocator\s*\]' src/algorithm/; then
-            echo "BOUNDARY VIOLATION — no #[global_allocator] in src/algorithm/"; exit 1
-          fi
-
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Correctness gate
-        run: cargo test --release
+      - uses: Swatinem/rust-cache@v2
 
-      - name: Score (wall-clock)
-        run: cargo run --release --bin bootstrap -- eval
+      - name: PR boundary guard
+        env:
+          GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: bash scripts/guard-pr.sh "${{ github.event.pull_request.base.sha }}"
+
+      - name: Require Model in PR description
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          algo_changed="$(git diff --name-only "${{ github.event.pull_request.base.sha }}"...HEAD -- src/algorithm/ || true)"
+          if [[ -z "$algo_changed" ]]; then
+            echo "No algorithm changes; skipping Model requirement"
+            exit 0
+          fi
+          model="$(bash scripts/ci-parse-pr-body.sh Model "$PR_BODY" || true)"
+          if [[ -z "$model" ]]; then
+            echo "::error::Missing required ## Model section in the PR description."
+            exit 1
+          fi
+
+      - name: Score gate (must beat record)
+        id: gate
+        env:
+          GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if git diff --name-only "${{ github.event.pull_request.base.sha }}"...HEAD -- src/algorithm/ | grep -q .; then
+            bash scripts/ci-score-gate.sh | tee /tmp/eval.out
+          else
+            echo "No algorithm changes; score gate skipped"
+          fi
+
+      - name: Summary
+        run: |
+          {
+            echo "## Verification passed"
+            echo
+            if [[ -f /tmp/eval.out ]]; then
+              echo '```'
+              tail -n 8 /tmp/eval.out
+              echo '```'
+            else
+              echo "Boundary/metadata checks passed (no algorithm changes)."
+            fi
+            echo
+            echo "**Scorekeeper** records the ledger after auto-merge."
+          } >> "$GITHUB_STEP_SUMMARY"

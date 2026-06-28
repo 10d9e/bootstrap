@@ -1,0 +1,51 @@
+name: Benchmark
+
+# Criterion wall-clock benchmark with full statistics. The authoritative SCORE is the
+# median wall-clock time from `bootstrap eval` (see Verify PR / Scorekeeper). Runtime on
+# shared CI runners is noisy, so this is a detailed cross-check, not a gate. For meaningful
+# comparison, pin a self-hosted reference runner.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - src/algorithm/**
+      - benches/**
+      - Cargo.toml
+      - .github/workflows/bench.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - src/algorithm/**
+      - benches/**
+  workflow_dispatch:
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run criterion benchmark
+        run: |
+          cargo bench --bench bootstrap -- \
+            --warm-up-time 1 --measurement-time 5 --noplot \
+            | tee bench.out
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo '## bootstrap timing benchmark'
+            echo
+            echo 'Detailed criterion statistics. The scoring metric is the median wall-clock'
+            echo 'time from `bootstrap eval`; shared-runner timing is noisy.'
+            echo
+            echo '```'
+            grep -E 'bootstrap|time:' bench.out || echo '(no benchmark output captured)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

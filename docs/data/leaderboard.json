@@ -1,0 +1,40 @@
+{
+  "repo": "10d9e/bootstrap",
+  "generatedAt": "2026-06-28T17:35:12Z",
+  "baseline": 12023834,
+  "baselines": [
+    {
+      "id": "baseline_fft_pbs",
+      "label": "baseline_fft_pbs",
+      "score": 12023834
+    }
+  ],
+  "record": {
+    "id": "0001",
+    "score": 12023834,
+    "author": "@10d9e"
+  },
+  "entries": [
+    {
+      "id": "0001",
+      "date": "2026-06-28",
+      "author": "@10d9e",
+      "model": "\u2014",
+      "score": 12023834,
+      "delta": "\u2014 (baseline)",
+      "deltaValue": null,
+      "commit": "baseline",
+      "commitFull": "`baseline`",
+      "status": "record",
+      "entryPath": "history/entries/0001-baseline.md",
+      "note": "Baseline autoresearch harness with a TFHE programmable bootstrap (CGGI blind rotation +\nsample-extract + key-switch) over an approximate f64 complex-FFT negacyclic multiplier\n(folded length-N/2 FFT). Parameters: N=1024, k=1, n=500, pbs \u2113=2 baselog=12, ks \u2113=5.\n`keygen` builds the GGSW bootstrap key + key-switch key and is untimed.",
+      "approach": "Baseline autoresearch harness with a TFHE programmable bootstrap (CGGI blind rotation +\nsample-extract + key-switch) over an approximate f64 complex-FFT negacyclic multiplier\n(folded length-N/2 FFT). Parameters: N=1024, k=1, n=500, pbs \u2113=2 baselog=12, ks \u2113=5.\n`keygen` builds the GGSW bootstrap key + key-switch key and is untimed.",
+      "iterationNotes": "",
+      "algoChanges": "(none \u2014 starting point)",
+      "evalSnapshot": "fixture           got want    margin  ok\nidentity/m0         0    0    14.1b  OK\nincrement/m0        1    1    14.6b  OK\nidentity/m1         1    1    16.8b  OK\nincrement/m1        2    2    12.7b  OK\nidentity/m2         2    2    15.5b  OK\nincrement/m2        3    3    12.9b  OK\nidentity/m3         3    3    13.7b  OK\nincrement/m3        0    0    12.6b  OK\n--------------------------------------------\n\nSCORE: 12023834 ns/bootstrap  (median of 31; best 11746584 ns) \u2014 LOWER IS BETTER\n       = 12.024 ms",
+      "scoreRank": 1,
+      "isRecord": true,
+      "isNonWinning": false
+    }
+  ]
+}

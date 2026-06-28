@@ -24,6 +24,15 @@ pub fn bootstrap(sk: &ServerKey, ct: &Lwe, lut: &Lut) -> Lwe;            // time
 bash scripts/evaluate.sh
 ```
 
+## Submit
+
+```bash
+bash scripts/submit.sh --model "<model>"
+```
+
+Runs `evaluate.sh`, checks you beat the record, opens a PR, and waits for CI to verify,
+auto-merge, and record the score on the [leaderboard](https://10d9e.github.io/bootstrap/).
+
 ## Invariant
 
 `bootstrap(encrypt(m))` decrypts (under the input LWE key) to `lut[m]`, with a comfortable
