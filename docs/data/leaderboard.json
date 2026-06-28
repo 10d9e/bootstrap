@@ -1,12 +1,17 @@
 {
   "repo": "10d9e/bootstrap",
-  "generatedAt": "2026-06-28T17:35:12Z",
-  "baseline": 12023834,
+  "generatedAt": "2026-06-28T17:41:28Z",
+  "baseline": 14186041,
   "baselines": [
     {
-      "id": "baseline_fft_pbs",
-      "label": "baseline_fft_pbs",
+      "id": "record_0001",
+      "label": "record_0001",
       "score": 12023834
+    },
+    {
+      "id": "baseline_n600",
+      "label": "baseline_n600",
+      "score": 14186041
     }
   ],
   "record": {
@@ -16,22 +21,43 @@
   },
   "entries": [
     {
+      "id": "0000",
+      "date": "2026-06-28",
+      "author": "@10d9e",
+      "model": "\u2014",
+      "score": 14186041,
+      "delta": "\u2014 (baseline)",
+      "deltaValue": null,
+      "commit": "f59fe38",
+      "commitFull": "`f59fe38`",
+      "status": "record",
+      "entryPath": "history/entries/0000-baseline.md",
+      "note": "Original baseline, before tuning the blind-rotation length. A TFHE programmable bootstrap\n(CGGI blind rotation + sample-extract + key-switch) over an approximate f64 complex-FFT\nnegacyclic multiplier (folded length-N/2 FFT), at blind-rotation length **n=600**. The\ndominant cost is the n CMux external products, so this sets the pre-tuning reference (~14 ms,\nthe \"15 ms baseline\").",
+      "approach": "Original baseline, before tuning the blind-rotation length. A TFHE programmable bootstrap\n(CGGI blind rotation + sample-extract + key-switch) over an approximate f64 complex-FFT\nnegacyclic multiplier (folded length-N/2 FFT), at blind-rotation length **n=600**. The\ndominant cost is the n CMux external products, so this sets the pre-tuning reference (~14 ms,\nthe \"15 ms baseline\").",
+      "iterationNotes": "",
+      "algoChanges": "(none \u2014 starting point)",
+      "evalSnapshot": "all fixtures OK (identity + increment LUTs, every message, comfortable noise margin)\nSCORE: 14186041 ns/bootstrap  (median of 31) \u2014 LOWER IS BETTER\n       = 14.186 ms",
+      "scoreRank": 2,
+      "isRecord": true,
+      "isNonWinning": true
+    },
+    {
       "id": "0001",
       "date": "2026-06-28",
       "author": "@10d9e",
       "model": "\u2014",
       "score": 12023834,
-      "delta": "\u2014 (baseline)",
+      "delta": "-2162207 (new record)",
       "deltaValue": null,
-      "commit": "baseline",
-      "commitFull": "`baseline`",
+      "commit": "f59fe38",
+      "commitFull": "`f59fe38`",
       "status": "record",
       "entryPath": "history/entries/0001-baseline.md",
-      "note": "Baseline autoresearch harness with a TFHE programmable bootstrap (CGGI blind rotation +\nsample-extract + key-switch) over an approximate f64 complex-FFT negacyclic multiplier\n(folded length-N/2 FFT). Parameters: N=1024, k=1, n=500, pbs \u2113=2 baselog=12, ks \u2113=5.\n`keygen` builds the GGSW bootstrap key + key-switch key and is untimed.",
-      "approach": "Baseline autoresearch harness with a TFHE programmable bootstrap (CGGI blind rotation +\nsample-extract + key-switch) over an approximate f64 complex-FFT negacyclic multiplier\n(folded length-N/2 FFT). Parameters: N=1024, k=1, n=500, pbs \u2113=2 baselog=12, ks \u2113=5.\n`keygen` builds the GGSW bootstrap key + key-switch key and is untimed.",
+      "note": "Tune the blind-rotation length from n=600 to **n=500** (the classic TFHE gate-bootstrap\ndimension). The bootstrap cost is dominated by the n CMux external products, so shortening\nthe blind rotation is the largest single lever: ~14 ms \u2192 ~12 ms. Same optimized f64-FFT\ntransform (folded N/2 FFT, reusable buffers, precomputed twiddle tables).",
+      "approach": "Tune the blind-rotation length from n=600 to **n=500** (the classic TFHE gate-bootstrap\ndimension). The bootstrap cost is dominated by the n CMux external products, so shortening\nthe blind rotation is the largest single lever: ~14 ms \u2192 ~12 ms. Same optimized f64-FFT\ntransform (folded N/2 FFT, reusable buffers, precomputed twiddle tables).",
       "iterationNotes": "",
-      "algoChanges": "(none \u2014 starting point)",
-      "evalSnapshot": "fixture           got want    margin  ok\nidentity/m0         0    0    14.1b  OK\nincrement/m0        1    1    14.6b  OK\nidentity/m1         1    1    16.8b  OK\nincrement/m1        2    2    12.7b  OK\nidentity/m2         2    2    15.5b  OK\nincrement/m2        3    3    12.9b  OK\nidentity/m3         3    3    13.7b  OK\nincrement/m3        0    0    12.6b  OK\n--------------------------------------------\n\nSCORE: 12023834 ns/bootstrap  (median of 31; best 11746584 ns) \u2014 LOWER IS BETTER\n       = 12.024 ms",
+      "algoChanges": "(harness parameter: blind-rotation length n 600 -> 500)",
+      "evalSnapshot": "fixture           got want    margin  ok\nidentity/m0         0    0    14.1b  OK\nincrement/m0        1    1    14.6b  OK\nidentity/m1         1    1    16.8b  OK\nincrement/m1        2    2    12.7b  OK\nidentity/m2         2    2    15.5b  OK\nincrement/m2        3    3    12.9b  OK\nidentity/m3         3    3    13.7b  OK\nincrement/m3        0    0    12.6b  OK\n--------------------------------------------\n\nSCORE: 11546042 ns/bootstrap  (median of 31; best 10993000 ns) \u2014 LOWER IS BETTER\n       = 11.546 ms",
       "scoreRank": 1,
       "isRecord": true,
       "isNonWinning": false

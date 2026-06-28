@@ -47,7 +47,7 @@ function renderStats(data) {
       good: true,
       sub: data.record ? `${data.record.author} · #${data.record.id}` : "",
     }),
-    statCard("Baseline", fmtCompact(baseline), { sub: "entry #0001" }),
+    statCard("Baseline", fmtCompact(baseline), { sub: scored.length ? `entry #${scored[0].id}` : "" }),
     statCard("Speedup", improvement != null ? fmtCompact(improvement) : "—", {
       good: improvement != null && improvement > 0,
       sub: pct != null ? `${pct}% faster` : "",

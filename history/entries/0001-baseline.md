@@ -1,4 +1,4 @@
-# Entry 0001 — SCORE 12023834 (baseline)
+# Entry 0001 — SCORE 12023834 (-2162207 (new record))
 
 | Field | Value |
 |-------|-------|
@@ -6,22 +6,22 @@
 | Author | @10d9e |
 | Model | — |
 | Git author | autoresearch |
-| Commit | `baseline` |
+| Commit | `f59fe38` |
 | SCORE | 12023834 |
-| Δ vs previous record | — (initial baseline) |
+| Δ vs previous record | -2162207 (new record) |
 | Status | record |
 
 ## Approach
 
-Baseline autoresearch harness with a TFHE programmable bootstrap (CGGI blind rotation +
-sample-extract + key-switch) over an approximate f64 complex-FFT negacyclic multiplier
-(folded length-N/2 FFT). Parameters: N=1024, k=1, n=500, pbs ℓ=2 baselog=12, ks ℓ=5.
-`keygen` builds the GGSW bootstrap key + key-switch key and is untimed.
+Tune the blind-rotation length from n=600 to **n=500** (the classic TFHE gate-bootstrap
+dimension). The bootstrap cost is dominated by the n CMux external products, so shortening
+the blind rotation is the largest single lever: ~14 ms → ~12 ms. Same optimized f64-FFT
+transform (folded N/2 FFT, reusable buffers, precomputed twiddle tables).
 
 ## Algorithm changes
 
 ```
-(none — starting point)
+(harness parameter: blind-rotation length n 600 -> 500)
 ```
 
 ## Eval snapshot
@@ -38,6 +38,6 @@ identity/m3         3    3    13.7b  OK
 increment/m3        0    0    12.6b  OK
 --------------------------------------------
 
-SCORE: 12023834 ns/bootstrap  (median of 31; best 11746584 ns) — LOWER IS BETTER
-       = 12.024 ms
+SCORE: 11546042 ns/bootstrap  (median of 31; best 10993000 ns) — LOWER IS BETTER
+       = 11.546 ms
 ```
