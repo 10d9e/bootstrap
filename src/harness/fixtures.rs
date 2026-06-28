@@ -1,0 +1,56 @@
+//! Fixed correctness fixtures + the timing input. FROZEN — do not edit as part of
+//! autoresearch.
+//!
+//! Each fixture is a (message, LUT, seed) triple. The LUTs include a non-identity function,
+//! so a pass-through (no-op) cannot satisfy the gate — only a real programmable bootstrap
+//! that applies `f` to the encrypted message decodes correctly.
+
+use crate::harness::params::{params, Lut};
+
+pub struct Fixture {
+    pub name: String,
+    pub message: u64,
+    pub lut: Lut,
+    pub seed: u64,
+}
+
+/// The LUT used for the timing measurement (identity — refresh the message unchanged).
+pub fn timing_lut() -> Lut {
+    let modulus = params().msg_modulus();
+    Lut {
+        values: (0..modulus).collect(),
+    }
+}
+
+/// The message / seed of the representative timing input.
+pub const TIMING_MESSAGE: u64 = 2;
+pub const TIMING_SEED: u64 = 0xC0FF_EE00;
+
+/// All scored correctness fixtures: every message under two LUTs (identity and +1).
+pub fn all() -> Vec<Fixture> {
+    let p = params();
+    let modulus = p.msg_modulus();
+    let identity: Vec<u64> = (0..modulus).collect();
+    let increment: Vec<u64> = (0..modulus).map(|m| (m + 1) % modulus).collect();
+
+    let mut v = Vec::new();
+    for m in 0..modulus {
+        v.push(Fixture {
+            name: format!("identity/m{m}"),
+            message: m,
+            lut: Lut {
+                values: identity.clone(),
+            },
+            seed: 0x1000 + m,
+        });
+        v.push(Fixture {
+            name: format!("increment/m{m}"),
+            message: m,
+            lut: Lut {
+                values: increment.clone(),
+            },
+            seed: 0x2000 + m,
+        });
+    }
+    v
+}

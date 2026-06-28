@@ -1,0 +1,41 @@
+name: Verify PR
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Boundary guard (only src/algorithm/ may change)
+        run: |
+          git fetch origin "${{ github.base_ref }}" --depth=1
+          changed=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")
+          echo "Changed files:"; echo "$changed"
+          bad=$(echo "$changed" | grep -v '^src/algorithm/' | grep -v '^$' || true)
+          if [ -n "$bad" ]; then
+            echo "BOUNDARY VIOLATION — frozen files modified:"; echo "$bad"; exit 1
+          fi
+
+      - name: Contract intact
+        run: |
+          mod=src/algorithm/mod.rs
+          grep -qF 'pub struct ServerKey' "$mod"
+          grep -qF 'pub fn keygen(params: Params, sk: &SecretKey, seed: u64) -> ServerKey' "$mod"
+          grep -qF 'pub fn bootstrap(sk: &ServerKey, ct: &Lwe, lut: &Lut) -> Lwe' "$mod"
+          if grep -rqE '#\[\s*global_allocator\s*\]' src/algorithm/; then
+            echo "BOUNDARY VIOLATION — no #[global_allocator] in src/algorithm/"; exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Correctness gate
+        run: cargo test --release
+
+      - name: Score (wall-clock)
+        run: cargo run --release --bin bootstrap -- eval

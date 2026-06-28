@@ -1,0 +1,31 @@
+[package]
+name = "bootstrap"
+version = "0.1.0"
+edition = "2021"
+description = "TFHE programmable-bootstrap autoresearch harness (wall-clock scored)"
+
+[lib]
+name = "bootstrap"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bootstrap"
+path = "src/main.rs"
+
+# The bootstrap uses an approximate f64 complex FFT for the negacyclic products.
+# Submitters may keep it, swap it for an NTT, or replace the whole transform.
+[dependencies]
+rustfft = "6"
+
+[dev-dependencies]
+criterion = "0.5"
+
+# Wall-clock timing benchmark (the SCORE is wall-clock; this is the detailed cross-check).
+[[bench]]
+name = "bootstrap"
+harness = false
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

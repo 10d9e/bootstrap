@@ -1,0 +1,417 @@
+//! Algorithm entry point — the TFHE **programmable bootstrap**.
+//!
+//! ┌─────────────────────────────────────────────────────────────────────┐
+//! │ FROZEN CONTRACT — do NOT change these signatures:                   │
+//! │     pub struct ServerKey;                                           │
+//! │     pub fn keygen(params: Params, sk: &SecretKey, seed: u64)        │
+//! │                   -> ServerKey;                                     │
+//! │     pub fn bootstrap(sk: &ServerKey, ct: &Lwe, lut: &Lut) -> Lwe;   │
+//! │ The bodies, and everything in this directory, are yours to improve. │
+//! │ Invariant: bootstrap(encrypt(m)) must decrypt to lut[m] under the   │
+//! │ input LWE key, with reduced (refreshed) noise.                      │
+//! └─────────────────────────────────────────────────────────────────────┘
+//!
+//! `keygen` builds the public bootstrap material from the secret key (it picks its own
+//! internal GLWE key) and is NOT timed. `bootstrap` is the timed operation: a CGGI
+//! programmable bootstrap — accumulator init + `n` CMux external products (blind rotation)
+//! + sample-extract + key-switch — over an approximate f64 complex-FFT negacyclic
+//! multiplier ([`fft`]). Submitters may change the transform, the decomposition strategy,
+//! the memory layout, add SIMD/parallelism, etc.
+
+mod fft;
+
+use crate::harness::{Lut, Lwe, Params, Rng, SecretKey};
+use fft::{fma, Fourier, NegacyclicFft};
+use rustfft::num_complex::Complex;
+
+type Cf = Complex<f64>;
+
+// ---------------------------------------------------------------------------
+// Internal ciphertext types
+// ---------------------------------------------------------------------------
+
+/// GLWE ciphertext: `k` mask polynomials + a body, degree `<N`.
+#[derive(Clone)]
+struct Glwe {
+    mask: Vec<Vec<u64>>,
+    body: Vec<u64>,
+}
+
+impl Glwe {
+    fn trivial(k: usize, body: Vec<u64>) -> Self {
+        let n = body.len();
+        Glwe {
+            mask: vec![vec![0u64; n]; k],
+            body,
+        }
+    }
+    fn comp(&self, i: usize) -> &[u64] {
+        if i < self.mask.len() {
+            &self.mask[i]
+        } else {
+            &self.body
+        }
+    }
+    fn comp_mut(&mut self, i: usize) -> &mut [u64] {
+        if i < self.mask.len() {
+            &mut self.mask[i]
+        } else {
+            &mut self.body
+        }
+    }
+}
+
+/// A GGSW row in the Fourier domain (a GLWE: `k+1` spectra).
+type GgswRow = Vec<Fourier>;
+/// GGSW ciphertext in the Fourier domain: `(k+1)·ℓ` rows.
+struct GgswFourier {
+    rows: Vec<GgswRow>,
+}
+
+/// Reusable scratch buffers for the blind-rotation hot loop (no allocation per CMux).
+struct FftWs {
+    digits: Vec<Vec<i64>>, // pbs_l × N
+    pack: Vec<Cf>,         // N/2
+    spec: Vec<Cf>,         // N/2
+    acc: Vec<Vec<Cf>>,     // (k+1) × N/2
+    inv_buf: Vec<Cf>,      // N/2
+}
+
+impl FftWs {
+    fn new(p: &Params, m: usize) -> Self {
+        let zc = Complex::new(0.0, 0.0);
+        FftWs {
+            digits: vec![vec![0i64; p.poly]; p.pbs_l],
+            pack: vec![zc; m],
+            spec: vec![zc; m],
+            acc: vec![vec![zc; m]; p.k + 1],
+            inv_buf: vec![zc; m],
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Plaintext-space helpers
+// ---------------------------------------------------------------------------
+
+const MAX_L: usize = 8;
+
+/// Balanced gadget decomposition of `v` into `l` signed digits, base `2^baselog`.
+fn decompose(v: u64, l: usize, baselog: u32) -> [i64; MAX_L] {
+    let bits = l as u32 * baselog;
+    let shift = 64 - bits;
+    let mut state = (v >> (shift - 1)).wrapping_add(1) >> 1;
+    let mut out = [0i64; MAX_L];
+    let base = 1u64 << baselog;
+    let half = base >> 1;
+    for slot in out.iter_mut().take(l).rev() {
+        let mut digit = state & (base - 1);
+        state >>= baselog;
+        if digit >= half {
+            digit = digit.wrapping_sub(base);
+            state = state.wrapping_add(1);
+        }
+        *slot = digit as i64;
+    }
+    out
+}
+
+/// `X^r * p mod (X^N+1)`, `r in [0, 2N)` (coefficients wrapping past `X^N` are negated).
+fn mul_monomial(p: &[u64], r: usize) -> Vec<u64> {
+    let n = p.len();
+    let r = r % (2 * n);
+    let mut out = vec![0u64; n];
+    for (i, &val) in p.iter().enumerate() {
+        let mut pos = i + r;
+        let mut v = val;
+        while pos >= n {
+            pos -= n;
+            v = v.wrapping_neg();
+        }
+        out[pos] = out[pos].wrapping_add(v);
+    }
+    out
+}
+
+/// Allocation-free `dst = X^r * src mod (X^N+1)`.
+fn mul_monomial_into(src: &[u64], r: usize, dst: &mut [u64]) {
+    let n = src.len();
+    let r = r % (2 * n);
+    for d in dst.iter_mut() {
+        *d = 0;
+    }
+    for (i, &val) in src.iter().enumerate() {
+        let mut pos = i + r;
+        let mut v = val;
+        while pos >= n {
+            pos -= n;
+            v = v.wrapping_neg();
+        }
+        dst[pos] = dst[pos].wrapping_add(v);
+    }
+}
+
+/// `mod_switch(x)` into `[0, 2N)` (round `x · 2N / q`).
+fn mod_switch(x: u64, log2_2n: u32) -> usize {
+    let shift = 64 - log2_2n;
+    ((x.wrapping_add(1u64 << (shift - 1)) >> shift) as usize) & ((1 << log2_2n) - 1)
+}
+
+// ---------------------------------------------------------------------------
+// Key generation (untimed)
+// ---------------------------------------------------------------------------
+
+/// Public evaluation key: per-input-bit GGSW bootstrap key + key-switch key + the FFT
+/// context, all built from the secret key.
+pub struct ServerKey {
+    params: Params,
+    fft: NegacyclicFft,
+    bsk: Vec<GgswFourier>,
+    ksk: Vec<Vec<Lwe>>,
+}
+
+/// Build the server key. Generates an internal GLWE key, the GGSW bootstrap key (each
+/// encrypting an LWE-key bit under the GLWE key), and the key-switch key (from the
+/// sample-extracted GLWE key back to the input LWE key). Untimed.
+pub fn keygen(params: Params, sk: &SecretKey, seed: u64) -> ServerKey {
+    let fft = NegacyclicFft::new(params.poly);
+    let mut rng = Rng::new(seed);
+    let n = params.poly;
+
+    let glwe_key: Vec<Vec<u64>> = (0..params.k)
+        .map(|_| (0..n).map(|_| rng.next_bit()).collect())
+        .collect();
+    let glwe_flat: Vec<u64> = glwe_key.iter().flatten().copied().collect();
+
+    let bsk: Vec<GgswFourier> = (0..params.n)
+        .map(|i| ggsw_encrypt_scalar(&params, &fft, &glwe_key, sk.lwe[i], &mut rng))
+        .collect();
+
+    let ksk: Vec<Vec<Lwe>> = (0..glwe_flat.len())
+        .map(|j| {
+            (0..params.ks_l)
+                .map(|lev| {
+                    let weight = 1u64 << (64 - (lev as u32 + 1) * params.ks_baselog);
+                    lwe_encrypt_raw(&params, &sk.lwe, glwe_flat[j].wrapping_mul(weight), &mut rng)
+                })
+                .collect()
+        })
+        .collect();
+
+    ServerKey {
+        params,
+        fft,
+        bsk,
+        ksk,
+    }
+}
+
+/// Raw LWE encryption of a torus value `mu` under `key` (for the key-switch key).
+fn lwe_encrypt_raw(p: &Params, key: &[u64], mu: u64, rng: &mut Rng) -> Lwe {
+    let a: Vec<u64> = (0..p.n).map(|_| rng.next_u64()).collect();
+    let mut b = mu.wrapping_add(rng.gaussian(p.sigma));
+    for (ai, si) in a.iter().zip(key) {
+        b = b.wrapping_add(ai.wrapping_mul(*si));
+    }
+    Lwe { a, b }
+}
+
+/// Negacyclic product via the FFT (key generation only; its error is folded into noise).
+fn ring_mul(fft: &NegacyclicFft, a: &[u64], s: &[u64]) -> Vec<u64> {
+    let fa = fft.forward_torus(a);
+    let fs = fft.forward_torus(s);
+    let mut prod = vec![Complex::new(0.0, 0.0); fft.spectrum_len()];
+    fma(&mut prod, &fa, &fs);
+    let mut out = vec![0u64; fft.n()];
+    fft.inverse_to_torus(prod, &mut out);
+    out
+}
+
+/// GLWE encryption of a message polynomial under the GLWE key.
+fn glwe_encrypt(
+    p: &Params,
+    fft: &NegacyclicFft,
+    glwe_key: &[Vec<u64>],
+    message: &[u64],
+    rng: &mut Rng,
+) -> Glwe {
+    let n = p.poly;
+    let mask: Vec<Vec<u64>> = (0..p.k)
+        .map(|_| (0..n).map(|_| rng.next_u64()).collect())
+        .collect();
+    let mut body: Vec<u64> = (0..n)
+        .map(|j| message[j].wrapping_add(rng.gaussian(p.sigma)))
+        .collect();
+    for (ai, si) in mask.iter().zip(glwe_key) {
+        let prod = ring_mul(fft, ai, si);
+        for (b, pr) in body.iter_mut().zip(&prod) {
+            *b = b.wrapping_add(*pr);
+        }
+    }
+    Glwe { mask, body }
+}
+
+/// GGSW encryption of a scalar `mu ∈ {0,1}` under the GLWE key, returned in Fourier form.
+fn ggsw_encrypt_scalar(
+    p: &Params,
+    fft: &NegacyclicFft,
+    glwe_key: &[Vec<u64>],
+    mu: u64,
+    rng: &mut Rng,
+) -> GgswFourier {
+    let n = p.poly;
+    let kp1 = p.k + 1;
+    let zero = vec![0u64; n];
+    let mut rows = Vec::with_capacity(kp1 * p.pbs_l);
+    for i in 0..kp1 {
+        for j in 0..p.pbs_l {
+            let mut g = glwe_encrypt(p, fft, glwe_key, &zero, rng);
+            let weight = 1u64 << (64 - (j as u32 + 1) * p.pbs_baselog);
+            g.comp_mut(i)[0] = g.comp_mut(i)[0].wrapping_add(mu.wrapping_mul(weight));
+            let row: GgswRow = (0..kp1).map(|c| fft.forward_torus(g.comp(c))).collect();
+            rows.push(row);
+        }
+    }
+    GgswFourier { rows }
+}
+
+// ---------------------------------------------------------------------------
+// Bootstrap (timed)
+// ---------------------------------------------------------------------------
+
+/// Allocation-free external product `GGSW(μ) ⊡ glwe_in → out` in the Fourier domain.
+fn external_product_into(
+    p: &Params,
+    fft: &NegacyclicFft,
+    ggsw: &GgswFourier,
+    glwe_in: &Glwe,
+    out: &mut Glwe,
+    ws: &mut FftWs,
+) {
+    let kp1 = p.k + 1;
+    for spec in ws.acc.iter_mut() {
+        spec.iter_mut().for_each(|x| *x = Complex::new(0.0, 0.0));
+    }
+    for i in 0..kp1 {
+        let comp = glwe_in.comp(i);
+        for (ci, &c) in comp.iter().enumerate() {
+            let d = decompose(c, p.pbs_l, p.pbs_baselog);
+            for lev in 0..p.pbs_l {
+                ws.digits[lev][ci] = d[lev];
+            }
+        }
+        for j in 0..p.pbs_l {
+            fft.forward_signed_into(&ws.digits[j], &mut ws.spec, &mut ws.pack);
+            let row = &ggsw.rows[i * p.pbs_l + j];
+            for oc in 0..kp1 {
+                fma(&mut ws.acc[oc], &ws.spec, &row[oc]);
+            }
+        }
+    }
+    for oc in 0..kp1 {
+        fft.inverse_into(&ws.acc[oc], out.comp_mut(oc), &mut ws.inv_buf);
+    }
+}
+
+/// `dst = X^r · src` (negacyclic monomial rotation of every component).
+fn glwe_mul_monomial_into(src: &Glwe, r: usize, dst: &mut Glwe) {
+    for c in 0..src.mask.len() {
+        mul_monomial_into(&src.mask[c], r, &mut dst.mask[c]);
+    }
+    mul_monomial_into(&src.body, r, &mut dst.body);
+}
+
+/// Extract the constant coefficient of a GLWE into an LWE under the flattened GLWE key.
+fn sample_extract(p: &Params, glwe: &Glwe) -> Lwe {
+    let n = p.poly;
+    let mut a = vec![0u64; p.k * n];
+    for i in 0..p.k {
+        let m = &glwe.mask[i];
+        a[i * n] = m[0];
+        for j in 1..n {
+            a[i * n + j] = m[n - j].wrapping_neg();
+        }
+    }
+    Lwe {
+        a,
+        b: glwe.body[0],
+    }
+}
+
+/// Key-switch an LWE under the flattened GLWE key (dim `k·N`) back to the input key (dim `n`).
+fn key_switch(p: &Params, ksk: &[Vec<Lwe>], ct: &Lwe) -> Lwe {
+    let mut a = vec![0u64; p.n];
+    let mut b = ct.b;
+    for (j, aj) in ct.a.iter().enumerate() {
+        let digits = decompose(*aj, p.ks_l, p.ks_baselog);
+        for lev in 0..p.ks_l {
+            let d = digits[lev];
+            let row = &ksk[j][lev];
+            b = b.wrapping_sub((d as u64).wrapping_mul(row.b));
+            for (ai, ri) in a.iter_mut().zip(&row.a) {
+                *ai = ai.wrapping_sub((d as u64).wrapping_mul(*ri));
+            }
+        }
+    }
+    Lwe { a, b }
+}
+
+/// Build the accumulator test polynomial encoding LUT `f` (half-box centered, redundant).
+fn build_test_poly(p: &Params, lut: &Lut) -> Vec<u64> {
+    let n = p.poly;
+    let p_eff = p.msg_modulus() as usize;
+    let box_size = n / p_eff;
+    let delta = p.delta();
+    let mut tv = vec![0u64; n];
+    for i in 0..n {
+        let m = (i / box_size) % p_eff;
+        tv[i] = lut.values[m].wrapping_mul(delta);
+    }
+    mul_monomial(&tv, 2 * n - box_size / 2)
+}
+
+/// Programmable bootstrap: refresh `ct` (LWE under `s`) while applying `lut`. Returns a
+/// fresh LWE under `s` encrypting `lut[message]`. This is the timed operation.
+pub fn bootstrap(sk: &ServerKey, ct: &Lwe, lut: &Lut) -> Lwe {
+    let p = &sk.params;
+    let fft = &sk.fft;
+    let n = p.poly;
+    let log2_2n = (2 * n).trailing_zeros();
+
+    // 1. Accumulator = test polynomial rotated by -b̃ (trivial GLWE).
+    let test = build_test_poly(p, lut);
+    let b_tilde = mod_switch(ct.b, log2_2n);
+    let mut acc = Glwe::trivial(p.k, mul_monomial(&test, 2 * n - b_tilde));
+
+    // 2. Blind rotation: n CMux external products, reusing scratch buffers.
+    let mut ws = FftWs::new(p, fft.spectrum_len());
+    let mut rotated = Glwe::trivial(p.k, vec![0u64; n]);
+    let mut diff = Glwe::trivial(p.k, vec![0u64; n]);
+    let mut prod = Glwe::trivial(p.k, vec![0u64; n]);
+    for i in 0..p.n {
+        let a_tilde = mod_switch(ct.a[i], log2_2n);
+        if a_tilde == 0 {
+            continue; // X^0 ⇒ no-op CMux
+        }
+        glwe_mul_monomial_into(&acc, a_tilde, &mut rotated);
+        for c in 0..p.k + 1 {
+            for (d, (r, a)) in diff
+                .comp_mut(c)
+                .iter_mut()
+                .zip(rotated.comp(c).iter().zip(acc.comp(c)))
+            {
+                *d = r.wrapping_sub(*a);
+            }
+        }
+        external_product_into(p, fft, &sk.bsk[i], &diff, &mut prod, &mut ws);
+        for c in 0..p.k + 1 {
+            for (a, pr) in acc.comp_mut(c).iter_mut().zip(prod.comp(c)) {
+                *a = a.wrapping_add(*pr);
+            }
+        }
+    }
+
+    // 3. Sample-extract the constant term, then key-switch back to the input key.
+    let extracted = sample_extract(p, &acc);
+    key_switch(p, &sk.ksk, &extracted)
+}
