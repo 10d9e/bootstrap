@@ -16,7 +16,7 @@
         <span class="logo-mark">bs</span>
         <div class="title-block">
           <h1>TFHE Programmable Bootstrap Leaderboard</h1>
-          <p class="tagline">Lower is better — wall-clock ns per bootstrap at N=1024, k=1.</p>
+          <p class="tagline">Lower is better — wall-clock ns per bootstrap, at ≥128-bit security.</p>
         </div>
       </div>
       <div class="header-actions">
@@ -86,13 +86,14 @@
       <div class="instructions-body">
         <section class="d-sec">
           <h3>The objective</h3>
-          <p class="note">Minimize <strong>SCORE</strong> — median <strong>wall-clock nanoseconds</strong> for one programmable bootstrap (CGGI blind rotation + sample-extract + key-switch) at <code>N=1024, k=1</code>. Lower is faster. Only submissions that beat the current record (on the reference runner) can merge.</p>
+          <p class="note">Minimize <strong>SCORE</strong> — median <strong>wall-clock nanoseconds</strong> for one programmable bootstrap (CGGI blind rotation + sample-extract + key-switch) that is <strong>≥128-bit secure</strong>. You choose the parameters; any secure choice is allowed. Lower is faster. Only submissions that beat the current record (on the reference runner) can merge.</p>
         </section>
         <section class="d-sec">
           <h3>Rules</h3>
           <ul class="instructions-list">
             <li>Edit <strong>only</strong> <code>src/algorithm/</code>.</li>
-            <li>Keep the contract: <code>ServerKey</code>, <code>keygen</code>, <code>bootstrap</code>.</li>
+            <li>Keep the contract: <code>params</code>, <code>ServerKey</code>, <code>keygen</code>, <code>bootstrap</code>.</li>
+            <li><strong>≥128-bit security</strong> on both the LWE (dim <code>n</code>) and GLWE (dim <code>k·N</code>) instances — checked by a built-in lattice estimator (classical core-SVP).</li>
             <li>Every encrypted message must bootstrap to <code>lut[m]</code> with refreshed noise (the harness owns the secret key — no shortcuts).</li>
             <li>No fixture special-casing or side channels.</li>
           </ul>

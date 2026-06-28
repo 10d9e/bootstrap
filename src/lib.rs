@@ -7,5 +7,5 @@ pub mod algorithm;
 pub mod harness;
 
 /// The stable contract the harness depends on.
-pub use algorithm::{bootstrap, keygen, ServerKey};
+pub use algorithm::{bootstrap, keygen, params, ServerKey};
 pub use harness::{Lut, Lwe, Params, SecretKey};

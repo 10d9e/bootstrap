@@ -4,8 +4,9 @@
 pub mod eval;
 pub mod fixtures;
 pub mod params;
+pub mod security;
 
 pub use params::{
-    decode, decrypt, encrypt, gen_secret_key, output_noise, params, phase, Lut, Lwe, Params, Rng,
-    SecretKey,
+    decode, decrypt, encrypt, gen_secret_key, output_noise, phase, security_bits, Lut, Lwe, Params,
+    Rng, SecretKey, REQUIRED_MESSAGE_BITS, SECURITY_BITS_REQUIRED,
 };

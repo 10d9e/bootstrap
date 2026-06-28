@@ -4,14 +4,21 @@
 //! apply the LUT to the encrypted message AND reduce noise (refresh). They use synthetic
 //! inputs distinct from the scored fixtures, so a candidate cannot pass by overfitting.
 
-use bootstrap::algorithm::{bootstrap, keygen};
-use bootstrap::harness::params::{decrypt, encrypt, gen_secret_key, output_noise, params, Lut};
+use bootstrap::algorithm::{bootstrap, keygen, params};
+use bootstrap::harness::params::{decrypt, encrypt, gen_secret_key, output_noise, security_bits, Lut};
+
+#[test]
+fn params_clear_128_bit_gate() {
+    let (lwe, glwe) = security_bits(&params());
+    assert!(lwe >= 128.0, "LWE security only {lwe:.1} bits");
+    assert!(glwe >= 128.0, "GLWE security only {glwe:.1} bits");
+}
 
 #[test]
 fn applies_lut_to_encrypted_message() {
     let p = params();
     let sk = gen_secret_key(p, 0xA11CE);
-    let server = keygen(p, &sk, 0xB0B);
+    let server = keygen(&sk, 0xB0B);
     let modulus = p.msg_modulus();
 
     // A few LUTs, including non-identity ones a pass-through could not satisfy.
@@ -42,7 +49,7 @@ fn refreshes_noise() {
     // pass-through), across many independent noise samples.
     let p = params();
     let sk = gen_secret_key(p, 0x5151);
-    let server = keygen(p, &sk, 0x6262);
+    let server = keygen(&sk, 0x6262);
     let modulus = p.msg_modulus();
     let lut = Lut {
         values: (0..modulus).map(|m| (m + 1) % modulus).collect(),

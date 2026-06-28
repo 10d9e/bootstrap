@@ -4,13 +4,13 @@
 //! Run with `cargo bench`.
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use bootstrap::algorithm::{bootstrap, keygen};
-use bootstrap::harness::params::{decrypt, encrypt, gen_secret_key, params, Lut};
+use bootstrap::algorithm::{bootstrap, keygen, params};
+use bootstrap::harness::params::{decrypt, encrypt, gen_secret_key, Lut};
 
 fn bench(c: &mut Criterion) {
     let p = params();
     let sk = gen_secret_key(p, 0x5EED_5EED);
-    let server = keygen(p, &sk, 0xB0_07_57_A9);
+    let server = keygen(&sk, 0xB0_07_57_A9);
     let ct = encrypt(p, &sk, 2, 0xC0FF_EE00);
     let lut = Lut {
         values: (0..p.msg_modulus()).collect(), // identity

@@ -1,7 +1,8 @@
 # Contributing — compete on bootstrap SCORE
 
-Make the TFHE programmable bootstrap faster in `src/algorithm/`, beat the **SCORE** record
-(wall-clock ns per bootstrap — lower is better), and leave a trail for the next researcher.
+Make the TFHE programmable bootstrap faster in `src/algorithm/` — **at ≥128-bit security** —
+beat the **SCORE** record (wall-clock ns per bootstrap — lower is better), and leave a trail
+for the next researcher. You choose the parameters; the harness gates them at ≥128-bit.
 
 Read [`AUTORESEARCH.md`](AUTORESEARCH.md) before editing.
 
@@ -41,6 +42,7 @@ After enabling GitHub Pages, the site lives at **https://10d9e.github.io/bootstr
 
 - [ ] Only `src/algorithm/` changed
 - [ ] PR has `## Model` and `## Approach`
+- [ ] `params()` clears the ≥128-bit security gate (LWE and GLWE)
 - [ ] SCORE beats the current record on the reference runner
 - [ ] No fixture-specific tuning or side channels
 

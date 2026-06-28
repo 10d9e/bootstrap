@@ -1,4 +1,3 @@
-# Baseline SCORE (wall-clock ns/bootstrap) — reference-runner measurements
+# Baseline SCORE (wall-clock ns/bootstrap) — reference-runner measurements, ≥128-bit secure
 # algorithm	ns	notes
-baseline_n600	14186041	entry 0000 — original f64-FFT bootstrap at n=600 (~14 ms)
-record_0001	12023834	entry 0001 — tuned blind-rotation length n=500
+baseline_128bit	49499417	entry 0000 — 128-bit-secure f64-FFT bootstrap (n=1024, N=2048)

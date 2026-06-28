@@ -5,7 +5,7 @@
 //! so a pass-through (no-op) cannot satisfy the gate — only a real programmable bootstrap
 //! that applies `f` to the encrypted message decodes correctly.
 
-use crate::harness::params::{params, Lut};
+use crate::harness::params::{Lut, REQUIRED_MESSAGE_BITS};
 
 pub struct Fixture {
     pub name: String,
@@ -14,11 +14,15 @@ pub struct Fixture {
     pub seed: u64,
 }
 
+/// The fixed message modulus the challenge bootstraps over.
+fn msg_modulus() -> u64 {
+    1u64 << (REQUIRED_MESSAGE_BITS - 1)
+}
+
 /// The LUT used for the timing measurement (identity — refresh the message unchanged).
 pub fn timing_lut() -> Lut {
-    let modulus = params().msg_modulus();
     Lut {
-        values: (0..modulus).collect(),
+        values: (0..msg_modulus()).collect(),
     }
 }
 
@@ -28,8 +32,7 @@ pub const TIMING_SEED: u64 = 0xC0FF_EE00;
 
 /// All scored correctness fixtures: every message under two LUTs (identity and +1).
 pub fn all() -> Vec<Fixture> {
-    let p = params();
-    let modulus = p.msg_modulus();
+    let modulus = msg_modulus();
     let identity: Vec<u64> = (0..modulus).collect();
     let increment: Vec<u64> = (0..modulus).map(|m| (m + 1) % modulus).collect();
 

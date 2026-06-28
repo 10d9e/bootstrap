@@ -2,7 +2,8 @@
 
 ## Goal
 
-Minimize **SCORE** (wall-clock ns for one programmable bootstrap) at `N=1024`, `k=1`.
+Minimize **SCORE** (wall-clock ns for one programmable bootstrap) — subject to **≥128-bit
+security**. You pick the parameters; any secure choice is allowed.
 
 ## Editable
 
@@ -12,11 +13,14 @@ Only `src/algorithm/**`.
 
 ```rust
 pub struct ServerKey;
-pub fn keygen(params: Params, sk: &SecretKey, seed: u64) -> ServerKey;   // untimed
-pub fn bootstrap(sk: &ServerKey, ct: &Lwe, lut: &Lut) -> Lwe;            // timed
+pub fn params() -> Params;                               // your parameter choice
+pub fn keygen(sk: &SecretKey, seed: u64) -> ServerKey;   // untimed
+pub fn bootstrap(sk: &ServerKey, ct: &Lwe, lut: &Lut) -> Lwe;   // timed
 ```
 
-`Params`, `SecretKey`, `Lwe`, `Lut` come from `crate::harness`.
+`Params`, `SecretKey`, `Lwe`, `Lut` come from `crate::harness`. The harness gates
+`params()` at ≥128-bit (classical core-SVP over LWE dim `n` and GLWE dim `k·N`, `q=2^64`,
+binary keys) and requires `message_bits == 3`.
 
 ## Evaluate
 
@@ -33,16 +37,19 @@ bash scripts/submit.sh --model "<model>"
 Runs `evaluate.sh`, checks you beat the record, opens a PR, and waits for CI to verify,
 auto-merge, and record the score on the [leaderboard](https://10d9e.github.io/bootstrap/).
 
-## Invariant
+## Gates
 
-`bootstrap(encrypt(m))` decrypts (under the input LWE key) to `lut[m]`, with a comfortable
-noise margin (a real refresh). The harness owns all secret material — you only see public
-keys and ciphertexts, so you cannot pass without a genuine bootstrap.
+1. `params().message_bits == 3`.
+2. **≥128-bit security** on both the LWE (dim `n`) and GLWE (dim `k·N`) instances, via the
+   built-in estimator (`src/harness/security.rs`).
+3. `bootstrap(encrypt(m))` decrypts to `lut[m]` with a comfortable noise margin (real
+   refresh). The harness owns all secret material — no shortcuts.
 
 ## Levers
 
-Real-SIMD / AVX FFT, exact NTT, deeper register/buffer reuse, batched FFTs, better gadget
-decomposition, parallelism across CMux/primes. `keygen` is free — precompute aggressively.
+Cheaper secure parameter corners (smaller `n` with larger `lwe_sigma`, a different `(k,N)`
+split, fewer decomposition levels), real-SIMD / AVX FFT, exact NTT, deeper register/buffer
+reuse, batched FFTs, parallel CMux. `keygen` is free — precompute aggressively.
 
 ## Full rules
 

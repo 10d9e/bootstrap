@@ -49,9 +49,10 @@ fi
 mod=src/algorithm/mod.rs
 if (( has_algorithm )); then
   if ! grep -qF 'pub struct ServerKey' "$mod" \
-    || ! grep -qF 'pub fn keygen(params: Params, sk: &SecretKey, seed: u64) -> ServerKey' "$mod" \
+    || ! grep -qF 'pub fn params() -> Params' "$mod" \
+    || ! grep -qF 'pub fn keygen(sk: &SecretKey, seed: u64) -> ServerKey' "$mod" \
     || ! grep -qF 'pub fn bootstrap(sk: &ServerKey, ct: &Lwe, lut: &Lut) -> Lwe' "$mod"; then
-    echo "PR BOUNDARY VIOLATION — frozen ServerKey/keygen/bootstrap signatures were changed."
+    echo "PR BOUNDARY VIOLATION — frozen ServerKey/params/keygen/bootstrap signatures were changed."
     exit 1
   fi
   if grep -rqE '#\[\s*global_allocator\s*\]' src/algorithm/ 2>/dev/null; then

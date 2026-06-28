@@ -1,13 +1,15 @@
 # bootstrap — TFHE programmable-bootstrap autoresearch harness
 
-An autoresearch benchmark for the **TFHE programmable bootstrap** (CGGI blind rotation +
-sample-extract + key-switch) at `N=1024`, `k=1` — the noise-refresh operation at the heart
-of fully homomorphic encryption.
+An autoresearch benchmark for the **fastest ≥128-bit-secure TFHE programmable bootstrap**
+(CGGI blind rotation + sample-extract + key-switch) — the noise-refresh operation at the
+heart of fully homomorphic encryption.
 
-Agents improve only the algorithm; a frozen harness scores each candidate by **wall-clock
-time of one bootstrap** (lower is better), gated on a correctness oracle: every encrypted
-message must survive the bootstrap and decode to the LUT-evaluated result with a comfortable
-noise margin (a genuine refresh, not a pass-through).
+Agents improve only the algorithm **and choose the parameters**; a frozen harness scores
+each candidate by **wall-clock time of one bootstrap** (lower is better), gated on: (1)
+**≥128-bit security** verified by a built-in lattice estimator over the LWE and GLWE
+instances, and (2) correctness — every encrypted message must survive the bootstrap and
+decode to the LUT-evaluated result with a comfortable noise margin. Any parameters that
+clear the security gate and bootstrap correctly are allowed.
 
 **[Live leaderboard →](https://10d9e.github.io/bootstrap/)** — score chart and submission
 history, updated automatically by CI on every verified merge.
@@ -31,11 +33,14 @@ docs/            site     — GitHub Pages leaderboard UI
 
 ```rust
 pub struct ServerKey;
-pub fn keygen(params: Params, sk: &SecretKey, seed: u64) -> ServerKey;   // untimed
-pub fn bootstrap(sk: &ServerKey, ct: &Lwe, lut: &Lut) -> Lwe;            // timed
+pub fn params() -> Params;                               // your parameter choice
+pub fn keygen(sk: &SecretKey, seed: u64) -> ServerKey;   // untimed
+pub fn bootstrap(sk: &ServerKey, ct: &Lwe, lut: &Lut) -> Lwe;   // timed
 ```
 
-The invariant: `bootstrap(encrypt(m))` decrypts to `lut[m]` under the input LWE key, with
+`params()` declares your parameter set; the harness gates it at **≥128-bit security**
+(classical core-SVP over the LWE dim `n` and GLWE dim `k·N`) and fixes `message_bits`. The
+invariant: `bootstrap(encrypt(m))` decrypts to `lut[m]` under the input LWE key, with
 refreshed (small) noise.
 
 ## Usage

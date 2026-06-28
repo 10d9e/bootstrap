@@ -3,20 +3,21 @@
 //! ┌─────────────────────────────────────────────────────────────────────┐
 //! │ FROZEN CONTRACT — do NOT change these signatures:                   │
 //! │     pub struct ServerKey;                                           │
-//! │     pub fn keygen(params: Params, sk: &SecretKey, seed: u64)        │
-//! │                   -> ServerKey;                                     │
+//! │     pub fn params() -> Params;                                      │
+//! │     pub fn keygen(sk: &SecretKey, seed: u64) -> ServerKey;          │
 //! │     pub fn bootstrap(sk: &ServerKey, ct: &Lwe, lut: &Lut) -> Lwe;   │
 //! │ The bodies, and everything in this directory, are yours to improve. │
 //! │ Invariant: bootstrap(encrypt(m)) must decrypt to lut[m] under the   │
 //! │ input LWE key, with reduced (refreshed) noise.                      │
 //! └─────────────────────────────────────────────────────────────────────┘
 //!
-//! `keygen` builds the public bootstrap material from the secret key (it picks its own
-//! internal GLWE key) and is NOT timed. `bootstrap` is the timed operation: a CGGI
-//! programmable bootstrap — accumulator init + `n` CMux external products (blind rotation)
-//! + sample-extract + key-switch — over an approximate f64 complex-FFT negacyclic
-//! multiplier ([`fft`]). Submitters may change the transform, the decomposition strategy,
-//! the memory layout, add SIMD/parallelism, etc.
+//! `params()` declares the parameter set. The harness gates it at **≥128-bit security**
+//! (classical core-SVP over the LWE dim `n` and GLWE dim `k·N`) and fixes `message_bits`;
+//! within that, any `n`, `k`, `N`, decomposition, and noise are fair game. `keygen` builds
+//! the public bootstrap material from the secret key (picking its own internal GLWE key) and
+//! is NOT timed. `bootstrap` is the timed operation: a CGGI programmable bootstrap —
+//! accumulator init + `n` CMux external products (blind rotation) + sample-extract +
+//! key-switch — over an approximate f64 complex-FFT negacyclic multiplier ([`fft`]).
 
 mod fft;
 
@@ -170,10 +171,29 @@ pub struct ServerKey {
     ksk: Vec<Vec<Lwe>>,
 }
 
+/// The parameter set this submission targets. Must clear the harness's ≥128-bit security
+/// gate (over the LWE dimension `n` and the GLWE dimension `k·N`, `q = 2^64`, binary keys)
+/// and use the required `message_bits`. Any secure choice is allowed.
+pub fn params() -> Params {
+    Params {
+        n: 1024,           // input/output LWE dim — 130.8-bit core-SVP at σ=2^44
+        k: 1,
+        poly: 2048,        // GLWE dim k·N = 2048 — 163.8-bit core-SVP at σ=2^29
+        pbs_l: 2,
+        pbs_baselog: 12,
+        ks_l: 5,
+        ks_baselog: 4,
+        message_bits: 3,   // == REQUIRED_MESSAGE_BITS (4 messages)
+        lwe_sigma: 2.0f64.powi(44),
+        glwe_sigma: 2.0f64.powi(29),
+    }
+}
+
 /// Build the server key. Generates an internal GLWE key, the GGSW bootstrap key (each
 /// encrypting an LWE-key bit under the GLWE key), and the key-switch key (from the
 /// sample-extracted GLWE key back to the input LWE key). Untimed.
-pub fn keygen(params: Params, sk: &SecretKey, seed: u64) -> ServerKey {
+pub fn keygen(sk: &SecretKey, seed: u64) -> ServerKey {
+    let params = params();
     let fft = NegacyclicFft::new(params.poly);
     let mut rng = Rng::new(seed);
     let n = params.poly;
@@ -206,10 +226,11 @@ pub fn keygen(params: Params, sk: &SecretKey, seed: u64) -> ServerKey {
     }
 }
 
-/// Raw LWE encryption of a torus value `mu` under `key` (for the key-switch key).
+/// Raw LWE encryption of a torus value `mu` under `key` (for the key-switch key). Uses the
+/// LWE noise (the key-switch output lands under the small LWE key).
 fn lwe_encrypt_raw(p: &Params, key: &[u64], mu: u64, rng: &mut Rng) -> Lwe {
     let a: Vec<u64> = (0..p.n).map(|_| rng.next_u64()).collect();
-    let mut b = mu.wrapping_add(rng.gaussian(p.sigma));
+    let mut b = mu.wrapping_add(rng.gaussian(p.lwe_sigma));
     for (ai, si) in a.iter().zip(key) {
         b = b.wrapping_add(ai.wrapping_mul(*si));
     }
@@ -240,7 +261,7 @@ fn glwe_encrypt(
         .map(|_| (0..n).map(|_| rng.next_u64()).collect())
         .collect();
     let mut body: Vec<u64> = (0..n)
-        .map(|j| message[j].wrapping_add(rng.gaussian(p.sigma)))
+        .map(|j| message[j].wrapping_add(rng.gaussian(p.glwe_sigma)))
         .collect();
     for (ai, si) in mask.iter().zip(glwe_key) {
         let prod = ring_mul(fft, ai, si);
