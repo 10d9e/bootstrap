@@ -67,8 +67,10 @@ pub struct NegacyclicFft {
     twist_im: Vec<f64>,
     untwist_re: Vec<f64>,       // Re (conj(ψ_M^j)/M), split for SIMD
     untwist_im: Vec<f64>,       // Im untwist_scaled
-    omega: Vec<Cf>,             // exp(-iπ(2k+1)/N)
-    omega_inv_half: Vec<Cf>,    // 0.5 / omega[k]
+    omega_re: Vec<f64>,         // Re exp(-iπ(2k+1)/N) (split, untangle)
+    omega_im: Vec<f64>,
+    oih_re: Vec<f64>,           // Re (0.5/omega[k]) (split, inverse omega-manip)
+    oih_im: Vec<f64>,
     scratch: RefCell<Scratch>,
 }
 
@@ -135,7 +137,11 @@ impl NegacyclicFft {
         let omega: Vec<Cf> = (0..m)
             .map(|k| Complex::from_polar(1.0, -std::f64::consts::PI * (2 * k + 1) as f64 / n as f64))
             .collect();
-        let omega_inv_half = omega.iter().map(|w| 0.5 / w).collect();
+        let omega_re = omega.iter().map(|w| w.re).collect();
+        let omega_im = omega.iter().map(|w| w.im).collect();
+        let omega_inv_half: Vec<Cf> = omega.iter().map(|w| 0.5 / w).collect();
+        let oih_re = omega_inv_half.iter().map(|c| c.re).collect();
+        let oih_im = omega_inv_half.iter().map(|c| c.im).collect();
         Self {
             n,
             m,
@@ -147,8 +153,10 @@ impl NegacyclicFft {
             twist_im,
             untwist_re,
             untwist_im,
-            omega,
-            omega_inv_half,
+            omega_re,
+            omega_im,
+            oih_re,
+            oih_im,
             scratch: RefCell::new(Scratch {
                 re: vec![0.0; m],
                 im: vec![0.0; m],
@@ -262,16 +270,8 @@ impl NegacyclicFft {
     #[inline]
     fn untangle_forward(&self, re: &[f64], im: &[f64], spec: &mut [f64]) {
         let m = self.m;
-        let half_i = Complex::new(0.0, -0.5);
         let (sre, sim) = spec.split_at_mut(m);
-        for k in 0..m {
-            let km = m - 1 - k;
-            let ck = Complex::new(re[k], im[k]);
-            let cc = Complex::new(re[km], -im[km]);
-            let v = (ck + cc) * 0.5 + self.omega[k] * ((ck - cc) * half_i);
-            sre[k] = v.re;
-            sim[k] = v.im;
-        }
+        simd::untangle(re, im, &self.omega_re, &self.omega_im, sre, sim, m);
     }
 
     /// Allocation-free inverse of split-format `spec` (length `2M`) into torus coefficients `out`.
@@ -280,16 +280,7 @@ impl NegacyclicFft {
         let mut sc = self.scratch.borrow_mut();
         let Scratch { re, im } = &mut *sc;
         let (sre, sim) = spec.split_at(m);
-        for k in 0..m {
-            let km = m - 1 - k;
-            let sk = Complex::new(sre[k], sim[k]);
-            let skm = Complex::new(sre[km], -sim[km]);
-            let e = (sk + skm) * 0.5;
-            let o = (sk - skm) * self.omega_inv_half[k];
-            let r = self.bitrev[k] as usize; // fold bit-reversal into the omega load
-            re[r] = e.re - o.im;
-            im[r] = e.im + o.re;
-        }
+        simd::omega_manip(sre, sim, &self.oih_re, &self.oih_im, &self.bitrev, re, im, m);
         self.stages(re, im, false);
         simd::untwist_reduce(re, im, &self.untwist_re, &self.untwist_im, out, m);
     }
@@ -438,6 +429,149 @@ mod simd {
             let r = bitrev[j] as usize;
             re[r] = cr * tr[j] - ci * ti[j];
             im[r] = cr * ti[j] + ci * tr[j];
+        }
+    }
+
+    /// Inverse omega-manip (input pass): `e = ½(s_k + conj s_{m−1−k})`, `o = (s_k − conj s_{m−1−k})·(½/ω_k)`,
+    /// then `buf[bitrev[k]] = (e.re − o.im, e.im + o.re)`. Reversed-lane read of `s_{m−1−k}` (vext) +
+    /// bit-reversed scatter-store (lane extract). NEON; scalar elsewhere.
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    pub fn omega_manip(sre: &[f64], sim: &[f64], or: &[f64], oi: &[f64], bitrev: &[u32], re: &mut [f64], im: &mut [f64], m: usize) {
+        #[cfg(target_arch = "aarch64")]
+        {
+            if m >= 2 {
+                unsafe { neon_omega_manip(sre, sim, or, oi, bitrev, re, im, m) };
+                return;
+            }
+        }
+        #[allow(unreachable_code)]
+        for k in 0..m {
+            let km = m - 1 - k;
+            let (skr, ski) = (sre[k], sim[k]);
+            let (smr, smi) = (sre[km], -sim[km]);
+            let (er, ei) = (0.5 * (skr + smr), 0.5 * (ski + smi));
+            let (dr, di) = (skr - smr, ski - smi);
+            let orr = dr * or[k] - di * oi[k];
+            let oii = dr * oi[k] + di * or[k];
+            let r = bitrev[k] as usize;
+            re[r] = er - oii;
+            im[r] = ei + orr;
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[target_feature(enable = "neon")]
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn neon_omega_manip(sre: &[f64], sim: &[f64], or: &[f64], oi: &[f64], bitrev: &[u32], re: &mut [f64], im: &mut [f64], m: usize) {
+        use std::arch::aarch64::*;
+        let half = vdupq_n_f64(0.5);
+        let (sp, sip) = (sre.as_ptr(), sim.as_ptr());
+        let (rp, ip) = (re.as_mut_ptr(), im.as_mut_ptr());
+        let chunks = m / 2;
+        for c in 0..chunks {
+            let o = c * 2;
+            let skr = vld1q_f64(sp.add(o));
+            let ski = vld1q_f64(sip.add(o));
+            let rr = vld1q_f64(sp.add(m - 2 - o));
+            let ri = vld1q_f64(sip.add(m - 2 - o));
+            let smr = vextq_f64::<1>(rr, rr); // s_{m−1−k}.re
+            let smi = vnegq_f64(vextq_f64::<1>(ri, ri)); // conj ⇒ negate im
+            let er = vmulq_f64(vaddq_f64(skr, smr), half);
+            let ei = vmulq_f64(vaddq_f64(ski, smi), half);
+            let dr = vsubq_f64(skr, smr);
+            let di = vsubq_f64(ski, smi);
+            let orv = vld1q_f64(or.as_ptr().add(o));
+            let oiv = vld1q_f64(oi.as_ptr().add(o));
+            let orr = vfmsq_f64(vmulq_f64(dr, orv), di, oiv); // dr·or − di·oi
+            let oii = vfmaq_f64(vmulq_f64(dr, oiv), di, orv); // dr·oi + di·or
+            let outr = vsubq_f64(er, oii); // e.re − o.im
+            let outi = vaddq_f64(ei, orr); // e.im + o.re
+            let r0 = *bitrev.get_unchecked(o) as usize;
+            let r1 = *bitrev.get_unchecked(o + 1) as usize;
+            *rp.add(r0) = vgetq_lane_f64::<0>(outr);
+            *rp.add(r1) = vgetq_lane_f64::<1>(outr);
+            *ip.add(r0) = vgetq_lane_f64::<0>(outi);
+            *ip.add(r1) = vgetq_lane_f64::<1>(outi);
+        }
+        for k in chunks * 2..m {
+            let km = m - 1 - k;
+            let (skr, ski) = (sre[k], sim[k]);
+            let (smr, smi) = (sre[km], -sim[km]);
+            let (er, ei) = (0.5 * (skr + smr), 0.5 * (ski + smi));
+            let (dr, di) = (skr - smr, ski - smi);
+            let orr = dr * or[k] - di * oi[k];
+            let oii = dr * oi[k] + di * or[k];
+            let r = bitrev[k] as usize;
+            re[r] = er - oii;
+            im[r] = ei + orr;
+        }
+    }
+
+    /// Negacyclic untangle: `spec[k] = ½(c_k + conj c_{m−1−k}) + ω_k·(−½i)(c_k − conj c_{m−1−k})`.
+    /// SIMD via a reversed-lane (`vext`) load of `c_{m−1−k}` + sequential store (NEON; scalar else).
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    pub fn untangle(re: &[f64], im: &[f64], wr: &[f64], wi: &[f64], sre: &mut [f64], sim: &mut [f64], m: usize) {
+        #[cfg(target_arch = "aarch64")]
+        {
+            if m >= 2 {
+                unsafe { neon_untangle(re, im, wr, wi, sre, sim, m) };
+                return;
+            }
+        }
+        #[allow(unreachable_code)]
+        for k in 0..m {
+            let km = m - 1 - k;
+            let (ckr, cki) = (re[k], im[k]);
+            let (ccr, cci) = (re[km], -im[km]);
+            let (er, ei) = (0.5 * (ckr + ccr), 0.5 * (cki + cci));
+            let (dr, di) = (ckr - ccr, cki - cci);
+            let (tr, ti) = (0.5 * di, -0.5 * dr);
+            sre[k] = er + (wr[k] * tr - wi[k] * ti);
+            sim[k] = ei + (wr[k] * ti + wi[k] * tr);
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[target_feature(enable = "neon")]
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn neon_untangle(re: &[f64], im: &[f64], wr: &[f64], wi: &[f64], sre: &mut [f64], sim: &mut [f64], m: usize) {
+        use std::arch::aarch64::*;
+        let half = vdupq_n_f64(0.5);
+        let nhalf = vdupq_n_f64(-0.5);
+        let (rp, ip) = (re.as_ptr(), im.as_ptr());
+        let chunks = m / 2;
+        for c in 0..chunks {
+            let o = c * 2;
+            let ckr = vld1q_f64(rp.add(o));
+            let cki = vld1q_f64(ip.add(o));
+            let rr = vld1q_f64(rp.add(m - 2 - o));
+            let ri = vld1q_f64(ip.add(m - 2 - o));
+            let ccr = vextq_f64::<1>(rr, rr); // [re[m−1−o], re[m−2−o]]
+            let cci = vnegq_f64(vextq_f64::<1>(ri, ri));
+            let er = vmulq_f64(vaddq_f64(ckr, ccr), half);
+            let ei = vmulq_f64(vaddq_f64(cki, cci), half);
+            let dr = vsubq_f64(ckr, ccr);
+            let di = vsubq_f64(cki, cci);
+            let tr = vmulq_f64(di, half);
+            let ti = vmulq_f64(dr, nhalf);
+            let wrv = vld1q_f64(wr.as_ptr().add(o));
+            let wiv = vld1q_f64(wi.as_ptr().add(o));
+            let pr = vfmsq_f64(vmulq_f64(wrv, tr), wiv, ti);
+            let pi = vfmaq_f64(vmulq_f64(wrv, ti), wiv, tr);
+            vst1q_f64(sre.as_mut_ptr().add(o), vaddq_f64(er, pr));
+            vst1q_f64(sim.as_mut_ptr().add(o), vaddq_f64(ei, pi));
+        }
+        for k in chunks * 2..m {
+            let km = m - 1 - k;
+            let (ckr, cki) = (re[k], im[k]);
+            let (ccr, cci) = (re[km], -im[km]);
+            let (er, ei) = (0.5 * (ckr + ccr), 0.5 * (cki + cci));
+            let (dr, di) = (ckr - ccr, cki - cci);
+            let (tr, ti) = (0.5 * di, -0.5 * dr);
+            sre[k] = er + (wr[k] * tr - wi[k] * ti);
+            sim[k] = ei + (wr[k] * ti + wi[k] * tr);
         }
     }
 
