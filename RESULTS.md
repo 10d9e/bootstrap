@@ -13,7 +13,7 @@ the fixed reference runner.
 > **4-message** spec (`message_bits = 3`, a tighter noise budget) and their scores are **not
 > directly comparable** to 0003+.
 
-**Current record: 14878208** (@10d9e, entry 0003 — boolean; beats rs-tfhe `gate_nand` 14.6–14.8 ms head-to-head)
+**Current record: 11633833** (@10d9e, entry 0004 — boolean, (k=4,N=256) module split; ~32% under rs-tfhe)
 
 | # | date | author | SCORE | spec | commit | entry | note |
 |---|------|--------|-------|------|--------|-------|------|
@@ -21,3 +21,4 @@ the fixed reference runner.
 | 0001 | 2026-06-28 | @10d9e | 32413625 | 4-msg | `rstfhe` | [0001](history/entries/0001--10d9e.md) | rs-tfhe-style N=1024 params (n=768), 132/129.6-bit |
 | 0002 | 2026-06-29 | @10d9e | 18412583 | 4-msg | `fastpbs` | [0002](history/entries/0002--10d9e.md) | hand radix-4 SIMD FFT, split spectra, branchless decompose, fully-SIMD FFT scalar passes |
 | 0003 | 2026-06-29 | @10d9e | 14878208 | **boolean** | `boolgate` | [0003](history/entries/0003--10d9e.md) | **boolean gate** at n=700 — beats rs-tfhe (~14.4 vs 14.7 ms, same machine/params; faster hand FFT) |
+| 0004 | 2026-06-29 | @10d9e | 11633833 | **boolean** | `knsplit` | [0004](history/entries/0004--10d9e.md) | **module-LWE (k=4,N=256) split** — FFT work ∝(k+1)/(2k); ~9.9ms best, ~32% under rs-tfhe, margin 4.5 |

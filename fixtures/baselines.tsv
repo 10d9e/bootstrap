@@ -4,3 +4,4 @@ baseline_n2048	49499417	entry 0000 — N=2048 baseline
 rstfhe_n1024	32382959	entry 0001 — rs-tfhe-style N=1024 (n=768)
 fastpbs	18412583	entry 0002 — hand radix-4 SIMD FFT + fully-SIMD scalar passes
 boolgate_n700	14878208	entry 0003 — boolean gate n=700, beats rs-tfhe head-to-head
+boolgate_knsplit	11633833	entry 0004 — (k=4,N=256) module split, ~32% under rs-tfhe

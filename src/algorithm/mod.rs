@@ -157,17 +157,18 @@ pub struct ServerKey {
 /// gate (over the LWE dimension `n` and the GLWE dimension `k·N`, `q = 2^64`, binary keys)
 /// and use the required `message_bits`. Any secure choice is allowed.
 pub fn params() -> Params {
-    // rs-tfhe 128-bit boolean-gate parameters (n=700, N=1024), adapted to q=2^64. The boolean
-    // noise budget (gap = q/4) is roomier than the old 4-message space, so n drops to rs-tfhe's
-    // 700 — and with our FFT now faster than rustfft, this targets sub-rs-tfhe wall-clock.
+    // Boolean gate, 128-bit. KEY IDEA: security fixes only the module dimension k·N (=1024),
+    // but FFT work ∝ (k+1)/(2k)·(k·N)·log(N/2) DROPS as k grows / N shrinks. So split the GLWE
+    // as (k=2, N=512) instead of (k=1, N=1024): same security + key-switch, ~⅓ less FFT work
+    // (twice as many transforms, each ~2.25× cheaper). q=2^64.
     Params {
-        n: 700,            // input/output LWE dim — matches rs-tfhe (α=2e-5 ⇒ σ≈2^48)
-        k: 1,
-        poly: 1024,        // GLWE dim k·N = 1024
+        n: 700,            // input/output LWE dim (α=2e-5 ⇒ σ≈2^48), 134-bit
+        k: 4,
+        poly: 256,         // GLWE dim k·N = 1024 — sweet spot (k=8/N=128 regresses: bsk ∝ (k+1)²)
         pbs_l: 3,
         pbs_baselog: 7,    // 21-bit precision (min for q=2^64 decomposition error)
-        ks_l: 4,
-        ks_baselog: 5,     // fewer KS levels (boolean budget has slack) ⇒ faster key-switch
+        ks_l: 5,
+        ks_baselog: 4,
         message_bits: 2,   // == REQUIRED_MESSAGE_BITS (boolean gate: 2 messages)
         lwe_sigma: 2.0f64.powi(48),
         glwe_sigma: 2.0f64.powi(39),
