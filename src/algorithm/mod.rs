@@ -162,9 +162,9 @@ pub fn params() -> Params {
     // as (k=2, N=512) instead of (k=1, N=1024): same security + key-switch, ~⅓ less FFT work
     // (twice as many transforms, each ~2.25× cheaper). q=2^64.
     Params {
-        n: 700,            // input/output LWE dim (α=2e-5 ⇒ σ≈2^48), 134-bit
+        n: 680,            // LWE dim at the security floor (σ=2^48 ⇒ 130-bit); fewer CMux
         k: 4,
-        poly: 256,         // GLWE dim k·N = 1024 — sweet spot (k=8/N=128 regresses: bsk ∝ (k+1)²)
+        poly: 256,         // GLWE dim k·N = 1024 — sweet spot of FFT∝(k+1)/(2k) vs MAC∝(k+1)²
         pbs_l: 3,
         pbs_baselog: 7,    // 21-bit precision (min for q=2^64 decomposition error)
         ks_l: 5,
