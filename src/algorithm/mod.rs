@@ -72,14 +72,21 @@ struct FftWs {
     digits: Vec<Vec<i64>>, // pbs_l × N
     spec: Vec<f64>,        // 2·(N/2)
     acc: Vec<Vec<f64>>,    // (k+1) × 2·(N/2)
+    offset: u64,           // branchless-decomposition rounding bias
 }
 
 impl FftWs {
     fn new(p: &Params, m: usize) -> Self {
+        // offset = Σ_{i<l} (B/2)·2^(64−(i+1)·baselog): rounds + centers, so digits need no carry.
+        let mut offset = 0u64;
+        for i in 0..p.pbs_l as u32 {
+            offset = offset.wrapping_add((1u64 << (p.pbs_baselog - 1)) << (64 - (i + 1) * p.pbs_baselog));
+        }
         FftWs {
             digits: vec![vec![0i64; p.poly]; p.pbs_l],
             spec: vec![0.0; 2 * m],
             acc: vec![vec![0.0; 2 * m]; p.k + 1],
+            offset,
         }
     }
 }
@@ -293,24 +300,19 @@ fn external_product_into(
     }
     let l = p.pbs_l;
     let baselog = p.pbs_baselog;
-    let shift = 64 - l as u32 * baselog;
     let base = 1u64 << baselog;
     let mask = base - 1;
-    let half = base >> 1;
+    let half = (base >> 1) as i64;
+    let offset = ws.offset;
     for i in 0..kp1 {
         let comp = glwe_in.comp(i);
-        // Balanced gadget decomposition, batched in one pass over the N coefficients
-        // (inline, sequential writes per level — no per-coefficient call/array).
-        for (ci, &c) in comp.iter().enumerate() {
-            let mut state = (c >> (shift - 1)).wrapping_add(1) >> 1;
-            for lev in (0..l).rev() {
-                let mut digit = state & mask;
-                state >>= baselog;
-                if digit >= half {
-                    digit = digit.wrapping_sub(base);
-                    state = state.wrapping_add(1);
-                }
-                ws.digits[lev][ci] = digit as i64;
+        // Branchless gadget decomposition (offset trick): one vectorizable pass per level,
+        // digit = ((c+offset) >> shift & mask) − B/2. No carry chain, no data-dependent branch.
+        for lev in 0..l {
+            let shift = 64 - (lev as u32 + 1) * baselog;
+            let dst = &mut ws.digits[lev];
+            for (ci, &c) in comp.iter().enumerate() {
+                dst[ci] = (((c.wrapping_add(offset) >> shift) & mask) as i64) - half;
             }
         }
         for j in 0..p.pbs_l {
