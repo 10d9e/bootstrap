@@ -63,6 +63,8 @@ pub struct NegacyclicFft {
     r4: Vec<R4Stage>,           // fused radix-4 stages (quad stride h = 1,4,16,…)
     tail: Option<R2Stage>,      // trailing radix-2 stage when log2(M) is odd
     twist: Vec<Cf>,             // ψ_M^j = exp(-iπ j / M)
+    twist_re: Vec<f64>,         // Re ψ_M^j, split for SIMD (twist-pack)
+    twist_im: Vec<f64>,
     untwist_re: Vec<f64>,       // Re (conj(ψ_M^j)/M), split for SIMD
     untwist_im: Vec<f64>,       // Im untwist_scaled
     omega: Vec<Cf>,             // exp(-iπ(2k+1)/N)
@@ -125,6 +127,8 @@ impl NegacyclicFft {
         let twist: Vec<Cf> = (0..m)
             .map(|j| Complex::from_polar(1.0, -std::f64::consts::PI * j as f64 / m as f64))
             .collect();
+        let twist_re = twist.iter().map(|c| c.re).collect();
+        let twist_im = twist.iter().map(|c| c.im).collect();
         let untwist_scaled: Vec<Cf> = twist.iter().map(|w| w.conj() / m as f64).collect();
         let untwist_re = untwist_scaled.iter().map(|c| c.re).collect();
         let untwist_im = untwist_scaled.iter().map(|c| c.im).collect();
@@ -139,6 +143,8 @@ impl NegacyclicFft {
             r4,
             tail,
             twist,
+            twist_re,
+            twist_im,
             untwist_re,
             untwist_im,
             omega,
@@ -244,17 +250,9 @@ impl NegacyclicFft {
 
     /// Allocation-free forward of signed coefficients into split-format `spec_out` (length `2M`).
     pub fn forward_signed_into(&self, coeffs: &[i64], spec_out: &mut [f64]) {
-        let m = self.m;
         let mut sc = self.scratch.borrow_mut();
         let Scratch { re, im } = &mut *sc;
-        for j in 0..m {
-            let cr = coeffs[2 * j] as f64;
-            let ci = coeffs[2 * j + 1] as f64;
-            let t = self.twist[j];
-            let r = self.bitrev[j] as usize; // fold bit-reversal into the twist-pack load
-            re[r] = cr * t.re - ci * t.im;
-            im[r] = cr * t.im + ci * t.re;
-        }
+        simd::twist_pack(coeffs, &self.twist_re, &self.twist_im, &self.bitrev, re, im, self.m);
         self.stages(re, im, true);
         self.untangle_forward(re, im, spec_out);
     }
@@ -385,6 +383,64 @@ unsafe fn fma_avx(ar: &mut [f64], ai: &mut [f64], xr: &[f64], xi: &[f64], yr: &[
 /// radix-4 stage over a `4·h` block (quad stride `h`); `butterfly2` is one radix-2 stage.
 /// Both dispatch to NEON (aarch64) / AVX2+FMA (x86_64), else an auto-vectorized scalar form.
 mod simd {
+    /// Twist-pack the forward input: deinterleave even/odd torus coeffs, convert i64→f64, multiply
+    /// by the negacyclic twist `(tr,ti)`, and scatter to bit-reversed positions. SIMD computes two
+    /// lanes (NEON); the bit-reversed scatter is scalar lane-extract stores (write-scatter to L1 —
+    /// unlike a reversed *read*, this vectorizes the compute without a gather penalty).
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    pub fn twist_pack(coeffs: &[i64], tr: &[f64], ti: &[f64], bitrev: &[u32], re: &mut [f64], im: &mut [f64], m: usize) {
+        #[cfg(target_arch = "aarch64")]
+        {
+            if m >= 2 {
+                unsafe { neon_twist_pack(coeffs, tr, ti, bitrev, re, im, m) };
+                return;
+            }
+        }
+        #[allow(unreachable_code)]
+        for j in 0..m {
+            let cr = coeffs[2 * j] as f64;
+            let ci = coeffs[2 * j + 1] as f64;
+            let r = bitrev[j] as usize;
+            re[r] = cr * tr[j] - ci * ti[j];
+            im[r] = cr * ti[j] + ci * tr[j];
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[target_feature(enable = "neon")]
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn neon_twist_pack(coeffs: &[i64], tr: &[f64], ti: &[f64], bitrev: &[u32], re: &mut [f64], im: &mut [f64], m: usize) {
+        use std::arch::aarch64::*;
+        let cp = coeffs.as_ptr();
+        let rp = re.as_mut_ptr();
+        let ip = im.as_mut_ptr();
+        let chunks = m / 2;
+        for c in 0..chunks {
+            let o = c * 2;
+            let v = vld2q_s64(cp.add(2 * o)); // .0=[c[2o],c[2o+2]], .1=[c[2o+1],c[2o+3]]
+            let cr = vcvtq_f64_s64(v.0);
+            let ci = vcvtq_f64_s64(v.1);
+            let trv = vld1q_f64(tr.as_ptr().add(o));
+            let tiv = vld1q_f64(ti.as_ptr().add(o));
+            let pr = vfmsq_f64(vmulq_f64(cr, trv), ci, tiv);
+            let pi = vfmaq_f64(vmulq_f64(cr, tiv), ci, trv);
+            let r0 = *bitrev.get_unchecked(o) as usize;
+            let r1 = *bitrev.get_unchecked(o + 1) as usize;
+            *rp.add(r0) = vgetq_lane_f64::<0>(pr);
+            *rp.add(r1) = vgetq_lane_f64::<1>(pr);
+            *ip.add(r0) = vgetq_lane_f64::<0>(pi);
+            *ip.add(r1) = vgetq_lane_f64::<1>(pi);
+        }
+        for j in chunks * 2..m {
+            let cr = coeffs[2 * j] as f64;
+            let ci = coeffs[2 * j + 1] as f64;
+            let r = bitrev[j] as usize;
+            re[r] = cr * tr[j] - ci * ti[j];
+            im[r] = cr * ti[j] + ci * tr[j];
+        }
+    }
+
     /// `out[2j] = reduce(re[j]·ur − im[j]·ui)`, `out[2j+1] = reduce(re[j]·ui + im[j]·ur)`, where
     /// `reduce(v) = round(v) mod 2^64` (the q=2^64 float→torus map: `v − round(v·2⁻⁶⁴)·2⁶⁴`, then
     /// round to i64). The untwist complex-multiply + reduce, vectorized (NEON; scalar elsewhere).
