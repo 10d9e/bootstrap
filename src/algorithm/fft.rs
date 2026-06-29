@@ -63,7 +63,8 @@ pub struct NegacyclicFft {
     r4: Vec<R4Stage>,           // fused radix-4 stages (quad stride h = 1,4,16,…)
     tail: Option<R2Stage>,      // trailing radix-2 stage when log2(M) is odd
     twist: Vec<Cf>,             // ψ_M^j = exp(-iπ j / M)
-    untwist_scaled: Vec<Cf>,    // conj(ψ_M^j) / M
+    untwist_re: Vec<f64>,       // Re (conj(ψ_M^j)/M), split for SIMD
+    untwist_im: Vec<f64>,       // Im untwist_scaled
     omega: Vec<Cf>,             // exp(-iπ(2k+1)/N)
     omega_inv_half: Vec<Cf>,    // 0.5 / omega[k]
     scratch: RefCell<Scratch>,
@@ -124,7 +125,9 @@ impl NegacyclicFft {
         let twist: Vec<Cf> = (0..m)
             .map(|j| Complex::from_polar(1.0, -std::f64::consts::PI * j as f64 / m as f64))
             .collect();
-        let untwist_scaled = twist.iter().map(|w| w.conj() / m as f64).collect();
+        let untwist_scaled: Vec<Cf> = twist.iter().map(|w| w.conj() / m as f64).collect();
+        let untwist_re = untwist_scaled.iter().map(|c| c.re).collect();
+        let untwist_im = untwist_scaled.iter().map(|c| c.im).collect();
         let omega: Vec<Cf> = (0..m)
             .map(|k| Complex::from_polar(1.0, -std::f64::consts::PI * (2 * k + 1) as f64 / n as f64))
             .collect();
@@ -136,7 +139,8 @@ impl NegacyclicFft {
             r4,
             tail,
             twist,
-            untwist_scaled,
+            untwist_re,
+            untwist_im,
             omega,
             omega_inv_half,
             scratch: RefCell::new(Scratch {
@@ -289,19 +293,7 @@ impl NegacyclicFft {
             im[r] = e.im + o.re;
         }
         self.stages(re, im, false);
-        let two64 = 2.0f64.powi(64);
-        let inv_two64 = 2.0f64.powi(-64);
-        let reduce = |v: f64| -> u64 {
-            let r = v - (v * inv_two64).round() * two64;
-            r.round() as i64 as u64
-        };
-        for j in 0..m {
-            let t = self.untwist_scaled[j];
-            let cr = re[j] * t.re - im[j] * t.im;
-            let ci = re[j] * t.im + im[j] * t.re;
-            out[2 * j] = reduce(cr);
-            out[2 * j + 1] = reduce(ci);
-        }
+        simd::untwist_reduce(re, im, &self.untwist_re, &self.untwist_im, out, m);
     }
 
     /// Inverse of a spectrum back to torus coefficients (allocating; for key generation).
@@ -311,17 +303,81 @@ impl NegacyclicFft {
 }
 
 /// In place, `acc += a · b`: split-format complex pointwise multiply-accumulate over a spectrum
-/// (all length `2M`, `[re(M) | im(M)]`). Auto-vectorizes (NEON/AVX2) — the hot loop of the
-/// GGSW external product.
+/// (all length `2M`, `[re(M) | im(M)]`). The hot loop of the GGSW external product (called
+/// `(k+1)²·ℓ` times per CMux); hand-vectorized (NEON / AVX2+FMA / scalar).
 #[inline]
 pub fn fma(acc: &mut [f64], a: &[f64], b: &[f64]) {
     let m = acc.len() / 2;
     let (a_re, a_im) = a.split_at(m);
     let (b_re, b_im) = b.split_at(m);
     let (acc_re, acc_im) = acc.split_at_mut(m);
+    #[cfg(target_arch = "aarch64")]
+    {
+        // SAFETY: NEON is baseline on aarch64; all slices have length m.
+        unsafe { fma_neon(acc_re, acc_im, a_re, a_im, b_re, b_im, m) };
+        return;
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
+            unsafe { fma_avx(acc_re, acc_im, a_re, a_im, b_re, b_im, m) };
+            return;
+        }
+    }
+    #[allow(unreachable_code)]
     for i in 0..m {
         acc_re[i] += a_re[i] * b_re[i] - a_im[i] * b_im[i];
         acc_im[i] += a_re[i] * b_im[i] + a_im[i] * b_re[i];
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn fma_neon(ar: &mut [f64], ai: &mut [f64], xr: &[f64], xi: &[f64], yr: &[f64], yi: &[f64], m: usize) {
+    use std::arch::aarch64::*;
+    let chunks = m / 2;
+    for c in 0..chunks {
+        let o = c * 2;
+        let (xrv, xiv) = (vld1q_f64(xr.as_ptr().add(o)), vld1q_f64(xi.as_ptr().add(o)));
+        let (yrv, yiv) = (vld1q_f64(yr.as_ptr().add(o)), vld1q_f64(yi.as_ptr().add(o)));
+        // acc_re += xr*yr − xi*yi
+        let mut accr = vld1q_f64(ar.as_ptr().add(o));
+        accr = vfmaq_f64(accr, xrv, yrv);
+        accr = vfmsq_f64(accr, xiv, yiv);
+        vst1q_f64(ar.as_mut_ptr().add(o), accr);
+        // acc_im += xr*yi + xi*yr
+        let mut acci = vld1q_f64(ai.as_ptr().add(o));
+        acci = vfmaq_f64(acci, xrv, yiv);
+        acci = vfmaq_f64(acci, xiv, yrv);
+        vst1q_f64(ai.as_mut_ptr().add(o), acci);
+    }
+    for i in chunks * 2..m {
+        ar[i] += xr[i] * yr[i] - xi[i] * yi[i];
+        ai[i] += xr[i] * yi[i] + xi[i] * yr[i];
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+unsafe fn fma_avx(ar: &mut [f64], ai: &mut [f64], xr: &[f64], xi: &[f64], yr: &[f64], yi: &[f64], m: usize) {
+    use std::arch::x86_64::*;
+    let chunks = m / 4;
+    for c in 0..chunks {
+        let o = c * 4;
+        let (xrv, xiv) = (_mm256_loadu_pd(xr.as_ptr().add(o)), _mm256_loadu_pd(xi.as_ptr().add(o)));
+        let (yrv, yiv) = (_mm256_loadu_pd(yr.as_ptr().add(o)), _mm256_loadu_pd(yi.as_ptr().add(o)));
+        let mut accr = _mm256_loadu_pd(ar.as_ptr().add(o));
+        accr = _mm256_fmadd_pd(xrv, yrv, accr);
+        accr = _mm256_fnmadd_pd(xiv, yiv, accr); // accr − xi*yi
+        _mm256_storeu_pd(ar.as_mut_ptr().add(o), accr);
+        let mut acci = _mm256_loadu_pd(ai.as_ptr().add(o));
+        acci = _mm256_fmadd_pd(xrv, yiv, acci);
+        acci = _mm256_fmadd_pd(xiv, yrv, acci);
+        _mm256_storeu_pd(ai.as_mut_ptr().add(o), acci);
+    }
+    for i in chunks * 4..m {
+        ar[i] += xr[i] * yr[i] - xi[i] * yi[i];
+        ai[i] += xr[i] * yi[i] + xi[i] * yr[i];
     }
 }
 
@@ -329,6 +385,79 @@ pub fn fma(acc: &mut [f64], a: &[f64], b: &[f64]) {
 /// radix-4 stage over a `4·h` block (quad stride `h`); `butterfly2` is one radix-2 stage.
 /// Both dispatch to NEON (aarch64) / AVX2+FMA (x86_64), else an auto-vectorized scalar form.
 mod simd {
+    /// `out[2j] = reduce(re[j]·ur − im[j]·ui)`, `out[2j+1] = reduce(re[j]·ui + im[j]·ur)`, where
+    /// `reduce(v) = round(v) mod 2^64` (the q=2^64 float→torus map: `v − round(v·2⁻⁶⁴)·2⁶⁴`, then
+    /// round to i64). The untwist complex-multiply + reduce, vectorized (NEON; scalar elsewhere).
+    #[inline]
+    pub fn untwist_reduce(re: &[f64], im: &[f64], ur: &[f64], ui: &[f64], out: &mut [u64], m: usize) {
+        #[cfg(target_arch = "aarch64")]
+        {
+            unsafe { neon_untwist_reduce(re, im, ur, ui, out, m) };
+            return;
+        }
+        #[allow(unreachable_code)]
+        {
+            let two64 = 2.0f64.powi(64);
+            let inv = 2.0f64.powi(-64);
+            let reduce = |v: f64| -> u64 {
+                let r = v - (v * inv).round() * two64;
+                r.round() as i64 as u64
+            };
+            for j in 0..m {
+                let cr = re[j] * ur[j] - im[j] * ui[j];
+                let ci = re[j] * ui[j] + im[j] * ur[j];
+                out[2 * j] = reduce(cr);
+                out[2 * j + 1] = reduce(ci);
+            }
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[target_feature(enable = "neon")]
+    unsafe fn neon_untwist_reduce(
+        re: &[f64],
+        im: &[f64],
+        ur: &[f64],
+        ui: &[f64],
+        out: &mut [u64],
+        m: usize,
+    ) {
+        use std::arch::aarch64::*;
+        let two64 = vdupq_n_f64(2.0f64.powi(64));
+        let inv = vdupq_n_f64(2.0f64.powi(-64));
+        macro_rules! reduce {
+            ($v:expr) => {{
+                let q = vrndnq_f64(vmulq_f64($v, inv)); // round(v / 2^64)
+                let r = vfmsq_f64($v, q, two64); // v − q·2^64
+                vreinterpretq_u64_s64(vcvtq_s64_f64(vrndnq_f64(r)))
+            }};
+        }
+        let (rp, ip) = (re.as_ptr(), im.as_ptr());
+        let (urp, uip) = (ur.as_ptr(), ui.as_ptr());
+        let op = out.as_mut_ptr();
+        let chunks = m / 2;
+        for c in 0..chunks {
+            let o = c * 2;
+            let rv = vld1q_f64(rp.add(o));
+            let iv = vld1q_f64(ip.add(o));
+            let urv = vld1q_f64(urp.add(o));
+            let uiv = vld1q_f64(uip.add(o));
+            let cr = vfmsq_f64(vmulq_f64(rv, urv), iv, uiv);
+            let ci = vfmaq_f64(vmulq_f64(rv, uiv), iv, urv);
+            // interleaved store: out[2o]=cr0, out[2o+1]=ci0, out[2o+2]=cr1, out[2o+3]=ci1
+            vst2q_u64(op.add(2 * o), uint64x2x2_t(reduce!(cr), reduce!(ci)));
+        }
+        let two64s = 2.0f64.powi(64);
+        let invs = 2.0f64.powi(-64);
+        for j in chunks * 2..m {
+            let cr = re[j] * ur[j] - im[j] * ui[j];
+            let ci = re[j] * ui[j] + im[j] * ur[j];
+            let red = |v: f64| (v - (v * invs).round() * two64s).round() as i64 as u64;
+            out[2 * j] = red(cr);
+            out[2 * j + 1] = red(ci);
+        }
+    }
+
     /// Fused radix-4 DIT butterfly (equivalent to two radix-2 stages). For each `j`:
     /// quad `(a,b,c,d) = arr[base+{j, j+h, j+2h, j+3h}]`, inner twiddle `wa = ω_2h^j`, outer
     /// `w0 = ω_4h^j`, and `wB1 = -i·w0` (forward) via the `isign` sign on the imaginary cross-term:
