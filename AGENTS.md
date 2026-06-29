@@ -19,8 +19,8 @@ pub fn bootstrap(sk: &ServerKey, ct: &Lwe, lut: &Lut) -> Lwe;   // timed
 ```
 
 `Params`, `SecretKey`, `Lwe`, `Lut` come from `crate::harness`. The harness gates
-`params()` at ≥128-bit (classical core-SVP over LWE dim `n` and GLWE dim `k·N`, `q=2^64`,
-binary keys) and requires `message_bits == 3`.
+`params()` at ≥128-bit (standard lattice-estimator model over LWE dim `n` and GLWE dim `k·N`,
+`q=2^64`, binary keys) and requires `message_bits == 3`.
 
 ## Evaluate
 

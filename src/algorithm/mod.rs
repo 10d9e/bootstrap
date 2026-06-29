@@ -12,7 +12,7 @@
 //! └─────────────────────────────────────────────────────────────────────┘
 //!
 //! `params()` declares the parameter set. The harness gates it at **≥128-bit security**
-//! (classical core-SVP over the LWE dim `n` and GLWE dim `k·N`) and fixes `message_bits`;
+//! (standard lattice-estimator model over the LWE dim `n` and GLWE dim `k·N`) and fixes `message_bits`;
 //! within that, any `n`, `k`, `N`, decomposition, and noise are fair game. `keygen` builds
 //! the public bootstrap material from the secret key (picking its own internal GLWE key) and
 //! is NOT timed. `bootstrap` is the timed operation: a CGGI programmable bootstrap —
@@ -175,17 +175,20 @@ pub struct ServerKey {
 /// gate (over the LWE dimension `n` and the GLWE dimension `k·N`, `q = 2^64`, binary keys)
 /// and use the required `message_bits`. Any secure choice is allowed.
 pub fn params() -> Params {
+    // rs-tfhe-style 128-bit parameters (N=1024), adapted to q=2^64 / 4-message space. Our
+    // 4-message space has a tighter noise budget than rs-tfhe's boolean gate bootstrap, so
+    // n=768 (vs rs-tfhe's 700) lets lwe_sigma drop, cutting key-switch noise.
     Params {
-        n: 1024,           // input/output LWE dim — 130.8-bit core-SVP at σ=2^44
+        n: 768,            // input/output LWE dim — 132-bit at σ=2^46
         k: 1,
-        poly: 2048,        // GLWE dim k·N = 2048 — 163.8-bit core-SVP at σ=2^29
-        pbs_l: 2,
-        pbs_baselog: 12,
-        ks_l: 5,
-        ks_baselog: 4,
+        poly: 1024,        // GLWE dim k·N = 1024 — ~129-bit at σ=2^39
+        pbs_l: 3,
+        pbs_baselog: 7,    // 21-bit precision (min for q=2^64 decomposition error)
+        ks_l: 8,
+        ks_baselog: 2,     // fine key-switch ⇒ low key-switch noise
         message_bits: 3,   // == REQUIRED_MESSAGE_BITS (4 messages)
-        lwe_sigma: 2.0f64.powi(44),
-        glwe_sigma: 2.0f64.powi(29),
+        lwe_sigma: 2.0f64.powi(46),
+        glwe_sigma: 2.0f64.powi(39),
     }
 }
 

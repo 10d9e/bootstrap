@@ -93,7 +93,7 @@
           <ul class="instructions-list">
             <li>Edit <strong>only</strong> <code>src/algorithm/</code>.</li>
             <li>Keep the contract: <code>params</code>, <code>ServerKey</code>, <code>keygen</code>, <code>bootstrap</code>.</li>
-            <li><strong>≥128-bit security</strong> on both the LWE (dim <code>n</code>) and GLWE (dim <code>k·N</code>) instances — checked by a built-in lattice estimator (classical core-SVP).</li>
+            <li><strong>≥128-bit security</strong> on both the LWE (dim <code>n</code>) and GLWE (dim <code>k·N</code>) instances — checked by a built-in lattice estimator (standard primal-uSVP + BDGL16 model).</li>
             <li>Every encrypted message must bootstrap to <code>lut[m]</code> with refreshed noise (the harness owns the secret key — no shortcuts).</li>
             <li>No fixture special-casing or side channels.</li>
           </ul>

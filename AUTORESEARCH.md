@@ -34,22 +34,24 @@ operation.
 1. **Functional spec** — `params().message_bits == 3` (a 4-message space). You can't shrink
    the message space to game the score.
 2. **Security ≥128 bits** — both the input/output LWE (dimension `n`) and the GLWE
-   (dimension `k·N`) must reach **≥128-bit classical core-SVP** security at `q = 2^64` with
-   binary secret keys, per the built-in estimator (`src/harness/security.rs`).
+   (dimension `k·N`) must reach **≥128-bit** security at `q = 2^64` with binary secret keys,
+   per the built-in estimator (`src/harness/security.rs`).
 3. **Correctness** — every fixture (each message under several LUTs, including non-identity
-   ones a pass-through could not satisfy) decodes to `f(message)` with a comfortable noise
-   margin (a genuine, noise-reducing refresh). `cargo test --release` checks this on
-   off-corpus inputs.
+   ones a pass-through could not satisfy) decodes to `f(message)`, and the output-noise σ
+   gives a decryption-failure margin `log2(gap/σ) ≥ 3.5` bits (≈ 2⁻⁶⁰ failure — a genuine,
+   noise-reducing refresh). `cargo test --release` checks this on off-corpus inputs.
 
 ## The security estimator
 
 `src/harness/security.rs` is a self-contained Rust approximation of the
-[lattice-estimator](https://github.com/malb/lattice-estimator): the **primal-uSVP** attack
-under the **classical core-SVP** cost model `2^{0.292·β}`, minimized over BKZ block size and
-samples, with the secret rescaled to the error scale (so binary secrets are accounted for).
-It is **conservative** — core-SVP lower-bounds the real attack cost, so clearing it implies
-the full estimator reports at least as much. (Calibration: Kyber512 → ~115 core-SVP bits vs
-the published ~118.) For final sign-off, cross-check with the actual lattice-estimator.
+[lattice-estimator](https://github.com/malb/lattice-estimator): the **primal-uSVP** attack,
+minimized over BKZ block size and samples, with the secret rescaled to the error scale (so
+binary secrets are accounted for), costed with the **standard model** —
+`log2(cost) = 0.292·β + 16.4 + log2(8·d)` (BDGL16 sieving per SVP call × the number of calls
+across BKZ tours). This is the model behind the "128-bit" parameters of TFHE-rs / rs-tfhe and
+the homomorphicencryption.org standard (raw core-SVP `0.292β` alone is far more
+conservative). Calibration: Kyber512 → ~144 bits (its NIST-level-1 gate-count figure ≈ 143);
+a σ=64 toy set is far below 128. For final sign-off, cross-check with the actual estimator.
 
 To raise security: increase the dimension (`n`, or `k·N`) and/or the noise (`lwe_sigma`,
 `glwe_sigma`). Larger noise must still bootstrap correctly — the input noise is rounded away

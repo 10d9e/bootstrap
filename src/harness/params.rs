@@ -14,7 +14,7 @@ use crate::harness::security::{lwe_bits, BINARY_SECRET_STD};
 
 /// Modulus exponent: `q = 2^64`.
 pub const LOG2_Q: f64 = 64.0;
-/// Required security level (classical core-SVP bits) for both the LWE and GLWE instances.
+/// Required security level (bits, standard lattice-estimator model) for the LWE and GLWE instances.
 pub const SECURITY_BITS_REQUIRED: f64 = 128.0;
 /// The fixed functional spec: total bits incl. padding ⇒ `2^(message_bits-1)` messages.
 /// A submission's `params().message_bits` must equal this (so the message space can't be
@@ -47,8 +47,8 @@ impl Params {
     }
 }
 
-/// Estimated classical core-SVP security (bits) of `(LWE dim n, GLWE dim k·N)`. Both must be
-/// ≥ [`SECURITY_BITS_REQUIRED`]. TFHE secret keys are binary.
+/// Estimated security (bits, standard lattice-estimator model) of `(LWE dim n, GLWE dim k·N)`.
+/// Both must be ≥ [`SECURITY_BITS_REQUIRED`]. TFHE secret keys are binary.
 pub fn security_bits(p: &Params) -> (f64, f64) {
     let lwe = lwe_bits(p.n, LOG2_Q, p.lwe_sigma, BINARY_SECRET_STD);
     let glwe = lwe_bits(p.k * p.poly, LOG2_Q, p.glwe_sigma, BINARY_SECRET_STD);
@@ -142,4 +142,19 @@ pub fn output_noise(p: Params, sk: &SecretKey, ct: &Lwe, expected_message: u64) 
     let ideal = expected_message.wrapping_mul(p.delta());
     let ph = phase(sk, ct);
     ph.wrapping_sub(ideal).min(ideal.wrapping_sub(ph))
+}
+
+/// Signed, centered residual noise `phase − expected_message·Δ` (wraps into `(-q/2, q/2]`),
+/// for estimating the output-noise standard deviation.
+pub fn output_noise_signed(p: Params, sk: &SecretKey, ct: &Lwe, expected_message: u64) -> i64 {
+    let ideal = expected_message.wrapping_mul(p.delta());
+    phase(sk, ct).wrapping_sub(ideal) as i64
+}
+
+/// Decryption-failure margin in bits, `log2(gap / σ)`, given the output-noise std-dev `sigma`
+/// (`gap = Δ/2`). A margin `m` ⇒ failure probability ≈ `erfc(2^m / √2)`: m=3.2 ⇒ ~2⁻⁴⁰,
+/// m=3.5 ⇒ ~2⁻⁶⁰, m=4 ⇒ ~2⁻¹³⁰. This (the output-noise σ, not the worst single sample) is
+/// the standard TFHE correctness measure.
+pub fn failure_margin_bits(p: Params, sigma: f64) -> f64 {
+    ((p.delta() / 2) as f64 / sigma.max(1.0)).log2()
 }

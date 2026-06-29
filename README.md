@@ -39,7 +39,7 @@ pub fn bootstrap(sk: &ServerKey, ct: &Lwe, lut: &Lut) -> Lwe;   // timed
 ```
 
 `params()` declares your parameter set; the harness gates it at **≥128-bit security**
-(classical core-SVP over the LWE dim `n` and GLWE dim `k·N`) and fixes `message_bits`. The
+(standard lattice-estimator model over the LWE dim `n` and GLWE dim `k·N`) and fixes `message_bits`. The
 invariant: `bootstrap(encrypt(m))` decrypts to `lut[m]` under the input LWE key, with
 refreshed (small) noise.
 

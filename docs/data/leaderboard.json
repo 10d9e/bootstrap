@@ -1,17 +1,22 @@
 {
   "repo": "10d9e/bootstrap",
-  "generatedAt": "2026-06-28T18:15:49Z",
+  "generatedAt": "2026-06-28T19:13:58Z",
   "baseline": 49499417,
   "baselines": [
     {
-      "id": "baseline_128bit",
-      "label": "baseline_128bit",
+      "id": "record_0001",
+      "label": "record_0001",
+      "score": 32382959
+    },
+    {
+      "id": "baseline_n2048",
+      "label": "baseline_n2048",
       "score": 49499417
     }
   ],
   "record": {
-    "id": "0000",
-    "score": 49499417,
+    "id": "0001",
+    "score": 32413625,
     "author": "@10d9e"
   },
   "entries": [
@@ -32,6 +37,27 @@
       "iterationNotes": "",
       "algoChanges": "(none \u2014 starting point)",
       "evalSnapshot": "params: n=1024 k=1 N=2048 | LWE \u03c3=2^44.0 dim 1024 \u2192 130.8 bits | GLWE \u03c3=2^29.0 dim 2048 \u2192 163.8 bits\nsecurity gate: OK (\u2265128 core-SVP bits)\nfixture           got want    margin  ok\nidentity/m0         0    0     9.4b  OK\nincrement/m0        1    1     9.4b  OK\nidentity/m1         1    1     6.8b  OK\nincrement/m1        2    2     6.6b  OK\nidentity/m2         2    2     7.6b  OK\nincrement/m2        3    3     7.7b  OK\nidentity/m3         3    3     8.9b  OK\nincrement/m3        0    0     9.4b  OK\n--------------------------------------------\n\nSCORE: 49499417 ns/bootstrap  (median of 21; best 48340084 ns) \u2014 LOWER IS BETTER\n       = 49.499 ms",
+      "scoreRank": 2,
+      "isRecord": true,
+      "isNonWinning": true
+    },
+    {
+      "id": "0001",
+      "date": "2026-06-28",
+      "author": "@10d9e",
+      "model": "opus 4.8",
+      "score": 32413625,
+      "delta": "-17085792 (new record)",
+      "deltaValue": null,
+      "commit": "rstfhe",
+      "commitFull": "`rstfhe`",
+      "status": "record",
+      "entryPath": "history/entries/0001--10d9e.md",
+      "note": "rs-tfhe-style **N=1024** parameters (the [rs-tfhe](https://github.com/thedonutfactory/rs-tfhe)\n128-bit gate-bootstrap shape), adapted to this challenge's q=2^64 / 4-message space. Halving\nthe ring degree from the N=2048 baseline roughly halves the FFT work. Same f64-FFT CGGI\nbootstrap; **only `src/algorithm/` changed** (parameters + decomposition).\n\n- LWE: `n=768`, `\u03c3=2^46` \u2192 **132-bit**. (rs-tfhe uses n=700; our 4-message space has a\n  tighter noise budget than its boolean gate, so a slightly larger n lets `lwe_sigma` drop\n  and cuts key-switch noise.)\n- GLWE: `k=1, N=1024`, `\u03c3=2^39` \u2192 **129.6-bit**.\n- `pbs \u2113=3 baselog=7` (21-bit), `ks \u2113=8 baselog=2` (fine key-switch). Output noise \u03c3\u22482^55.3\n  \u21d2 failure margin ~4.7 bits (\u2248 2^-130).\n\nThe SPQLIOS AVX/FMA assembly FFT that gives rs-tfhe its ~15 ms is a C++/assembly build\n(`cc` + `build.rs`) outside `src/algorithm/`, so it cannot be ported here; with the\ngeneric rustfft this lands ~32 ms. A hand-written `core::arch` AVX FFT inside `src/algorithm/`\n(allowed) is the path toward rs-tfhe's speed.",
+      "approach": "rs-tfhe-style **N=1024** parameters (the [rs-tfhe](https://github.com/thedonutfactory/rs-tfhe)\n128-bit gate-bootstrap shape), adapted to this challenge's q=2^64 / 4-message space. Halving\nthe ring degree from the N=2048 baseline roughly halves the FFT work. Same f64-FFT CGGI\nbootstrap; **only `src/algorithm/` changed** (parameters + decomposition).\n\n- LWE: `n=768`, `\u03c3=2^46` \u2192 **132-bit**. (rs-tfhe uses n=700; our 4-message space has a\n  tighter noise budget than its boolean gate, so a slightly larger n lets `lwe_sigma` drop\n  and cuts key-switch noise.)\n- GLWE: `k=1, N=1024`, `\u03c3=2^39` \u2192 **129.6-bit**.\n- `pbs \u2113=3 baselog=7` (21-bit), `ks \u2113=8 baselog=2` (fine key-switch). Output noise \u03c3\u22482^55.3\n  \u21d2 failure margin ~4.7 bits (\u2248 2^-130).\n\nThe SPQLIOS AVX/FMA assembly FFT that gives rs-tfhe its ~15 ms is a C++/assembly build\n(`cc` + `build.rs`) outside `src/algorithm/`, so it cannot be ported here; with the\ngeneric rustfft this lands ~32 ms. A hand-written `core::arch` AVX FFT inside `src/algorithm/`\n(allowed) is the path toward rs-tfhe's speed.",
+      "iterationNotes": "",
+      "algoChanges": "src/algorithm/mod.rs: params() \u2014 N 2048->1024, n 1024->768, retuned \u03c3/decomposition",
+      "evalSnapshot": "params: n=768 k=1 N=1024 | LWE \u03c3=2^46.0 dim 768 \u2192 132.0 bits | GLWE \u03c3=2^39.0 dim 1024 \u2192 129.6 bits\nsecurity gate: OK (\u2265128 bits, standard model)\nfixture           got want  ok\nidentity/m0         0    0  OK\nincrement/m0        1    1  OK\nidentity/m1         1    1  OK\nincrement/m1        2    2  OK\nidentity/m2         2    2  OK\nincrement/m2        3    3  OK\nidentity/m3         3    3  OK\nincrement/m3        0    0  OK\n--------------------------------------------\noutput noise: \u03c3=2^55.3, failure margin 4.7 bits (need \u22653.5)\n\nSCORE: 32413625 ns/bootstrap  (median of 21; best 31723917 ns) \u2014 LOWER IS BETTER\n       = 32.414 ms",
       "scoreRank": 1,
       "isRecord": true,
       "isNonWinning": false

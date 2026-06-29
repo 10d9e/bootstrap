@@ -7,6 +7,7 @@ pub mod params;
 pub mod security;
 
 pub use params::{
-    decode, decrypt, encrypt, gen_secret_key, output_noise, phase, security_bits, Lut, Lwe, Params,
-    Rng, SecretKey, REQUIRED_MESSAGE_BITS, SECURITY_BITS_REQUIRED,
+    decode, decrypt, encrypt, failure_margin_bits, gen_secret_key, output_noise,
+    output_noise_signed, phase, security_bits, Lut, Lwe, Params, Rng, SecretKey,
+    REQUIRED_MESSAGE_BITS, SECURITY_BITS_REQUIRED,
 };

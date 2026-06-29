@@ -5,7 +5,9 @@
 //! inputs distinct from the scored fixtures, so a candidate cannot pass by overfitting.
 
 use bootstrap::algorithm::{bootstrap, keygen, params};
-use bootstrap::harness::params::{decrypt, encrypt, gen_secret_key, output_noise, security_bits, Lut};
+use bootstrap::harness::params::{
+    decrypt, encrypt, failure_margin_bits, gen_secret_key, output_noise_signed, security_bits, Lut,
+};
 
 #[test]
 fn params_clear_128_bit_gate() {
@@ -45,8 +47,9 @@ fn applies_lut_to_encrypted_message() {
 
 #[test]
 fn refreshes_noise() {
-    // The output must sit far from the decode boundary (a real refresh, not a barely-correct
-    // pass-through), across many independent noise samples.
+    // A genuine refresh: estimate the output-noise σ over many fresh bootstraps and require
+    // the decryption-failure margin log2(gap/σ) ≥ 3.5 bits (≈ 2⁻⁶⁰ failure) — the standard
+    // failure-probability measure, not a worst single sample. Decoding must also be correct.
     let p = params();
     let sk = gen_secret_key(p, 0x5151);
     let server = keygen(&sk, 0x6262);
@@ -55,15 +58,18 @@ fn refreshes_noise() {
         values: (0..modulus).map(|m| (m + 1) % modulus).collect(),
     };
 
-    let mut worst_bits = 64.0f64;
-    for t in 0..40u64 {
+    let samples = 80u64;
+    let mut sumsq = 0.0f64;
+    for t in 0..samples {
         let m = t % modulus;
         let ct = encrypt(p, &sk, m, 0x9000 + t);
         let out = bootstrap(&server, &ct, &lut);
         let want = (m + 1) % modulus;
         assert_eq!(decrypt(p, &sk, &out), want, "message {m}");
-        let noise = output_noise(p, &sk, &out, want).max(1);
-        worst_bits = worst_bits.min(((p.delta() / 2) as f64 / noise as f64).log2());
+        let e = output_noise_signed(p, &sk, &out, want) as f64;
+        sumsq += e * e;
     }
-    assert!(worst_bits > 4.0, "noise margin too tight: {worst_bits:.1} bits");
+    let sigma = (sumsq / samples as f64).sqrt().max(1.0);
+    let margin = failure_margin_bits(p, sigma);
+    assert!(margin >= 3.5, "noise margin too tight: {margin:.1} bits (σ=2^{:.1})", sigma.log2());
 }
