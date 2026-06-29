@@ -23,9 +23,6 @@ mod fft;
 
 use crate::harness::{Lut, Lwe, Params, Rng, SecretKey};
 use fft::{fma, Fourier, NegacyclicFft};
-use rustfft::num_complex::Complex;
-
-type Cf = Complex<f64>;
 
 // ---------------------------------------------------------------------------
 // Internal ciphertext types
@@ -69,24 +66,20 @@ struct GgswFourier {
     rows: Vec<GgswRow>,
 }
 
-/// Reusable scratch buffers for the blind-rotation hot loop (no allocation per CMux).
+/// Reusable scratch buffers for the blind-rotation hot loop (no allocation per CMux). Spectra
+/// are split-format `[re(M) | im(M)]`, length `2M`.
 struct FftWs {
     digits: Vec<Vec<i64>>, // pbs_l × N
-    pack: Vec<Cf>,         // N/2
-    spec: Vec<Cf>,         // N/2
-    acc: Vec<Vec<Cf>>,     // (k+1) × N/2
-    inv_buf: Vec<Cf>,      // N/2
+    spec: Vec<f64>,        // 2·(N/2)
+    acc: Vec<Vec<f64>>,    // (k+1) × 2·(N/2)
 }
 
 impl FftWs {
     fn new(p: &Params, m: usize) -> Self {
-        let zc = Complex::new(0.0, 0.0);
         FftWs {
             digits: vec![vec![0i64; p.poly]; p.pbs_l],
-            pack: vec![zc; m],
-            spec: vec![zc; m],
-            acc: vec![vec![zc; m]; p.k + 1],
-            inv_buf: vec![zc; m],
+            spec: vec![0.0; 2 * m],
+            acc: vec![vec![0.0; 2 * m]; p.k + 1],
         }
     }
 }
@@ -132,24 +125,6 @@ fn mul_monomial(p: &[u64], r: usize) -> Vec<u64> {
         out[pos] = out[pos].wrapping_add(v);
     }
     out
-}
-
-/// Allocation-free `dst = X^r * src mod (X^N+1)`.
-fn mul_monomial_into(src: &[u64], r: usize, dst: &mut [u64]) {
-    let n = src.len();
-    let r = r % (2 * n);
-    for d in dst.iter_mut() {
-        *d = 0;
-    }
-    for (i, &val) in src.iter().enumerate() {
-        let mut pos = i + r;
-        let mut v = val;
-        while pos >= n {
-            pos -= n;
-            v = v.wrapping_neg();
-        }
-        dst[pos] = dst[pos].wrapping_add(v);
-    }
 }
 
 /// `mod_switch(x)` into `[0, 2N)` (round `x · 2N / q`).
@@ -244,7 +219,7 @@ fn lwe_encrypt_raw(p: &Params, key: &[u64], mu: u64, rng: &mut Rng) -> Lwe {
 fn ring_mul(fft: &NegacyclicFft, a: &[u64], s: &[u64]) -> Vec<u64> {
     let fa = fft.forward_torus(a);
     let fs = fft.forward_torus(s);
-    let mut prod = vec![Complex::new(0.0, 0.0); fft.spectrum_len()];
+    let mut prod = vec![0.0; 2 * fft.spectrum_len()];
     fma(&mut prod, &fa, &fs);
     let mut out = vec![0u64; fft.n()];
     fft.inverse_to_torus(prod, &mut out);
@@ -314,18 +289,32 @@ fn external_product_into(
 ) {
     let kp1 = p.k + 1;
     for spec in ws.acc.iter_mut() {
-        spec.iter_mut().for_each(|x| *x = Complex::new(0.0, 0.0));
+        spec.iter_mut().for_each(|x| *x = 0.0);
     }
+    let l = p.pbs_l;
+    let baselog = p.pbs_baselog;
+    let shift = 64 - l as u32 * baselog;
+    let base = 1u64 << baselog;
+    let mask = base - 1;
+    let half = base >> 1;
     for i in 0..kp1 {
         let comp = glwe_in.comp(i);
+        // Balanced gadget decomposition, batched in one pass over the N coefficients
+        // (inline, sequential writes per level — no per-coefficient call/array).
         for (ci, &c) in comp.iter().enumerate() {
-            let d = decompose(c, p.pbs_l, p.pbs_baselog);
-            for lev in 0..p.pbs_l {
-                ws.digits[lev][ci] = d[lev];
+            let mut state = (c >> (shift - 1)).wrapping_add(1) >> 1;
+            for lev in (0..l).rev() {
+                let mut digit = state & mask;
+                state >>= baselog;
+                if digit >= half {
+                    digit = digit.wrapping_sub(base);
+                    state = state.wrapping_add(1);
+                }
+                ws.digits[lev][ci] = digit as i64;
             }
         }
         for j in 0..p.pbs_l {
-            fft.forward_signed_into(&ws.digits[j], &mut ws.spec, &mut ws.pack);
+            fft.forward_signed_into(&ws.digits[j], &mut ws.spec);
             let row = &ggsw.rows[i * p.pbs_l + j];
             for oc in 0..kp1 {
                 fma(&mut ws.acc[oc], &ws.spec, &row[oc]);
@@ -333,7 +322,7 @@ fn external_product_into(
         }
     }
     for oc in 0..kp1 {
-        fft.inverse_into(&ws.acc[oc], out.comp_mut(oc), &mut ws.inv_buf);
+        fft.inverse_into(&ws.acc[oc], out.comp_mut(oc));
     }
 }
 
@@ -343,6 +332,25 @@ fn glwe_mul_monomial_into(src: &Glwe, r: usize, dst: &mut Glwe) {
         mul_monomial_into(&src.mask[c], r, &mut dst.mask[c]);
     }
     mul_monomial_into(&src.body, r, &mut dst.body);
+}
+
+/// Allocation-free `dst = X^r * src mod (X^N+1)`, as two contiguous regions (`copy_from_slice`
+/// + a negation loop — both vectorize), instead of branchy scattered writes.
+fn mul_monomial_into(src: &[u64], r: usize, dst: &mut [u64]) {
+    let n = src.len();
+    let r = r % (2 * n);
+    if r < n {
+        dst[r..].copy_from_slice(&src[..n - r]);
+        for i in 0..r {
+            dst[i] = src[n - r + i].wrapping_neg();
+        }
+    } else {
+        let r = r - n; // X^{n+r'} = −X^{r'}
+        for i in 0..n - r {
+            dst[r + i] = src[i].wrapping_neg();
+        }
+        dst[..r].copy_from_slice(&src[n - r..]);
+    }
 }
 
 /// Extract the constant coefficient of a GLWE into an LWE under the flattened GLWE key.

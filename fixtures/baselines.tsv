@@ -1,4 +1,5 @@
 # Baseline SCORE (wall-clock ns/bootstrap) — reference-runner measurements, ≥128-bit secure
 # algorithm	ns	notes
 baseline_n2048	49499417	entry 0000 — N=2048 baseline
-record_0001	32382959	entry 0001 — rs-tfhe-style N=1024 (n=768)
+rstfhe_n1024	32382959	entry 0001 — rs-tfhe-style N=1024 (n=768)
+fastpbs	22285625	entry 0002 — hand radix-4 SIMD FFT + split-format spectra + glue fixes
