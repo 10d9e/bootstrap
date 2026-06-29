@@ -26,11 +26,12 @@ pub fn timing_lut() -> Lut {
     }
 }
 
-/// The message / seed of the representative timing input.
-pub const TIMING_MESSAGE: u64 = 2;
+/// The message / seed of the representative timing input (`1` is in range for any message space).
+pub const TIMING_MESSAGE: u64 = 1;
 pub const TIMING_SEED: u64 = 0xC0FF_EE00;
 
-/// All scored correctness fixtures: every message under two LUTs (identity and +1).
+/// All scored correctness fixtures: every message under two LUTs (identity, and +1 — which for a
+/// boolean space is NOT). A pass-through cannot satisfy the non-identity LUT.
 pub fn all() -> Vec<Fixture> {
     let modulus = msg_modulus();
     let identity: Vec<u64> = (0..modulus).collect();

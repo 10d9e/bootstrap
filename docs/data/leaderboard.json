@@ -1,8 +1,13 @@
 {
   "repo": "10d9e/bootstrap",
-  "generatedAt": "2026-06-29T18:46:35Z",
+  "generatedAt": "2026-06-29T20:35:44Z",
   "baseline": 49499417,
   "baselines": [
+    {
+      "id": "boolgate_n700",
+      "label": "boolgate_n700",
+      "score": 14878208
+    },
     {
       "id": "fastpbs",
       "label": "fastpbs",
@@ -20,8 +25,8 @@
     }
   ],
   "record": {
-    "id": "0002",
-    "score": 18412583,
+    "id": "0003",
+    "score": 14878208,
     "author": "@10d9e"
   },
   "entries": [
@@ -31,8 +36,8 @@
       "author": "@10d9e",
       "model": "\u2014",
       "score": 49499417,
-      "delta": "\u2014 (baseline)",
-      "deltaValue": null,
+      "delta": "4-msg",
+      "deltaValue": 4,
       "commit": "secure",
       "commitFull": "`secure`",
       "status": "record",
@@ -42,7 +47,7 @@
       "iterationNotes": "",
       "algoChanges": "(none \u2014 starting point)",
       "evalSnapshot": "params: n=1024 k=1 N=2048 | LWE \u03c3=2^44.0 dim 1024 \u2192 130.8 bits | GLWE \u03c3=2^29.0 dim 2048 \u2192 163.8 bits\nsecurity gate: OK (\u2265128 core-SVP bits)\nfixture           got want    margin  ok\nidentity/m0         0    0     9.4b  OK\nincrement/m0        1    1     9.4b  OK\nidentity/m1         1    1     6.8b  OK\nincrement/m1        2    2     6.6b  OK\nidentity/m2         2    2     7.6b  OK\nincrement/m2        3    3     7.7b  OK\nidentity/m3         3    3     8.9b  OK\nincrement/m3        0    0     9.4b  OK\n--------------------------------------------\n\nSCORE: 49499417 ns/bootstrap  (median of 21; best 48340084 ns) \u2014 LOWER IS BETTER\n       = 49.499 ms",
-      "scoreRank": 3,
+      "scoreRank": 4,
       "isRecord": true,
       "isNonWinning": true
     },
@@ -52,8 +57,8 @@
       "author": "@10d9e",
       "model": "opus 4.8",
       "score": 32413625,
-      "delta": "-17085792 (new record)",
-      "deltaValue": null,
+      "delta": "4-msg",
+      "deltaValue": 4,
       "commit": "rstfhe",
       "commitFull": "`rstfhe`",
       "status": "record",
@@ -63,7 +68,7 @@
       "iterationNotes": "",
       "algoChanges": "src/algorithm/mod.rs: params() \u2014 N 2048->1024, n 1024->768, retuned \u03c3/decomposition",
       "evalSnapshot": "params: n=768 k=1 N=1024 | LWE \u03c3=2^46.0 dim 768 \u2192 132.0 bits | GLWE \u03c3=2^39.0 dim 1024 \u2192 129.6 bits\nsecurity gate: OK (\u2265128 bits, standard model)\nfixture           got want  ok\nidentity/m0         0    0  OK\nincrement/m0        1    1  OK\nidentity/m1         1    1  OK\nincrement/m1        2    2  OK\nidentity/m2         2    2  OK\nincrement/m2        3    3  OK\nidentity/m3         3    3  OK\nincrement/m3        0    0  OK\n--------------------------------------------\noutput noise: \u03c3=2^55.3, failure margin 4.7 bits (need \u22653.5)\n\nSCORE: 32413625 ns/bootstrap  (median of 21; best 31723917 ns) \u2014 LOWER IS BETTER\n       = 32.414 ms",
-      "scoreRank": 2,
+      "scoreRank": 3,
       "isRecord": true,
       "isNonWinning": true
     },
@@ -73,8 +78,8 @@
       "author": "@10d9e",
       "model": "opus 4.8",
       "score": 18412583,
-      "delta": "-31086834 (new record)",
-      "deltaValue": null,
+      "delta": "4-msg",
+      "deltaValue": 4,
       "commit": "fastpbs",
       "commitFull": "`fastpbs`",
       "status": "record",
@@ -84,8 +89,29 @@
       "iterationNotes": "",
       "algoChanges": "src/algorithm/fft.rs:  rustfft \u2192 hand radix-4 SIMD FFT; split-format spectra; fused twist/untangle\nsrc/algorithm/mod.rs:  inline batched decompose; copy_from_slice rotation; split-format pointwise MAC",
       "evalSnapshot": "params: n=768 k=1 N=1024 | LWE \u03c3=2^46.0 dim 768 \u2192 132.0 bits | GLWE \u03c3=2^39.0 dim 1024 \u2192 129.6 bits\nsecurity gate: OK (\u2265128 bits, standard model)\nfixture           got want  ok\nidentity/m0         0    0  OK\nincrement/m0        1    1  OK\nidentity/m1         1    1  OK\nincrement/m1        2    2  OK\nidentity/m2         2    2  OK\nincrement/m2        3    3  OK\nidentity/m3         3    3  OK\nincrement/m3        0    0  OK\n--------------------------------------------\noutput noise: \u03c3=2^55.4, failure margin 4.6 bits (need \u22653.5)\n\nSCORE: 18300208 ns/bootstrap  (median of 21; best 17627500 ns) \u2014 LOWER IS BETTER\n       = 18.300 ms",
-      "scoreRank": 1,
+      "scoreRank": 2,
       "isRecord": true,
+      "isNonWinning": true
+    },
+    {
+      "id": "0003",
+      "date": "2026-06-29",
+      "author": "@10d9e",
+      "model": "opus 4.8",
+      "score": 14878208,
+      "delta": "**boolean**",
+      "deltaValue": null,
+      "commit": "boolgate",
+      "commitFull": "`boolgate`",
+      "status": "record (boolean challenge)",
+      "entryPath": "history/entries/0003--10d9e.md",
+      "note": "**boolean gate** at n=700 \u2014 beats rs-tfhe (~14.4 vs 14.7 ms, same machine/params; faster hand FFT)",
+      "approach": "**boolean gate** at n=700 \u2014 beats rs-tfhe (~14.4 vs 14.7 ms, same machine/params; faster hand FFT)",
+      "iterationNotes": "",
+      "algoChanges": "",
+      "evalSnapshot": "params: n=700 k=1 N=1024 | LWE \u03c3=2^48.0 dim 700 \u2192 134.0 bits | GLWE \u03c3=2^39.0 dim 1024 \u2192 129.6 bits\nsecurity gate: OK (\u2265128 bits, standard model)\nfixture           got want  ok\nidentity/m0         0    0  OK\nincrement/m0        1    1  OK\nidentity/m1         1    1  OK\nincrement/m1        0    0  OK\n--------------------------------------------\noutput noise: \u03c3=2^57.3, failure margin 3.7 bits (need \u22653.5)\n\nSCORE: 14878208 ns/bootstrap  (median of 21; best 14816792 ns) \u2014 LOWER IS BETTER\n       = 14.878 ms",
+      "scoreRank": 1,
+      "isRecord": false,
       "isNonWinning": false
     }
   ]

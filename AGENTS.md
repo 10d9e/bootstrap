@@ -20,7 +20,7 @@ pub fn bootstrap(sk: &ServerKey, ct: &Lwe, lut: &Lut) -> Lwe;   // timed
 
 `Params`, `SecretKey`, `Lwe`, `Lut` come from `crate::harness`. The harness gates
 `params()` at ≥128-bit (standard lattice-estimator model over LWE dim `n` and GLWE dim `k·N`,
-`q=2^64`, binary keys) and requires `message_bits == 3`.
+`q=2^64`, binary keys) and requires `message_bits == 2` (a **boolean gate bootstrap** — 2 messages).
 
 ## Evaluate
 
@@ -39,7 +39,7 @@ auto-merge, and record the score on the [leaderboard](https://10d9e.github.io/bo
 
 ## Gates
 
-1. `params().message_bits == 3`.
+1. `params().message_bits == 2` (boolean gate: 2 messages).
 2. **≥128-bit security** on both the LWE (dim `n`) and GLWE (dim `k·N`) instances, via the
    built-in estimator (`src/harness/security.rs`).
 3. `bootstrap(encrypt(m))` decrypts to `lut[m]` with a comfortable noise margin (real

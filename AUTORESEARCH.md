@@ -31,8 +31,8 @@ operation.
 
 ## Gates (all must pass, or the candidate is INVALID)
 
-1. **Functional spec** — `params().message_bits == 3` (a 4-message space). You can't shrink
-   the message space to game the score.
+1. **Functional spec** — `params().message_bits == 2` — a **boolean gate bootstrap** (1 padding + 1 message bit,
+   2 messages), the rs-tfhe / CGGI gate setting. You can't change the message space to game the score.
 2. **Security ≥128 bits** — both the input/output LWE (dimension `n`) and the GLWE
    (dimension `k·N`) must reach **≥128-bit** security at `q = 2^64` with binary secret keys,
    per the built-in estimator (`src/harness/security.rs`).

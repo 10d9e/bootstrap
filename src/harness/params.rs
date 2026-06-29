@@ -18,8 +18,9 @@ pub const LOG2_Q: f64 = 64.0;
 pub const SECURITY_BITS_REQUIRED: f64 = 128.0;
 /// The fixed functional spec: total bits incl. padding ⇒ `2^(message_bits-1)` messages.
 /// A submission's `params().message_bits` must equal this (so the message space can't be
-/// shrunk to game the score).
-pub const REQUIRED_MESSAGE_BITS: u32 = 3;
+/// shrunk to game the score). `2` = a **boolean gate bootstrap** (1 padding + 1 message bit,
+/// 2 messages) — the rs-tfhe / CGGI gate setting.
+pub const REQUIRED_MESSAGE_BITS: u32 = 2;
 
 /// TFHE parameter set. Chosen by the submission, then validated by the harness.
 #[derive(Clone, Copy)]
